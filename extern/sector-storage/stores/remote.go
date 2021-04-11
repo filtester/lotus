@@ -37,8 +37,9 @@ type Remote struct {
 
 	limit chan struct{}
 
-	fetchLk  sync.Mutex
-	fetching map[abi.SectorID]chan struct{}
+	fetchLk                   sync.Mutex
+	fetching                  map[abi.SectorID]chan struct{}
+	allowMoveSectorFromWorker bool
 }
 
 func (r *Remote) RemoveCopies(ctx context.Context, s abi.SectorID, types storiface.SectorFileType) error {
@@ -49,13 +50,13 @@ func (r *Remote) RemoveCopies(ctx context.Context, s abi.SectorID, types storifa
 	return r.local.RemoveCopies(ctx, s, types)
 }
 
-func NewRemote(local *Local, index SectorIndex, auth http.Header, fetchLimit int) *Remote {
+func NewRemote(local *Local, index SectorIndex, auth http.Header, fetchLimit int, allowMoveSectorFromWorker bool) *Remote {
 	return &Remote{
-		local: local,
-		index: index,
-		auth:  auth,
-
-		limit: make(chan struct{}, fetchLimit),
+		local:                     local,
+		index:                     index,
+		auth:                      auth,
+		allowMoveSectorFromWorker: allowMoveSectorFromWorker,
+		limit:                     make(chan struct{}, fetchLimit),
 
 		fetching: map[abi.SectorID]chan struct{}{},
 	}
@@ -201,9 +202,22 @@ func (r *Remote) acquireFromRemote(ctx context.Context, s abi.SectorID, fileType
 			}
 
 			err = r.fetch(ctx, url, tempDest)
-			if err != nil {
-				merr = multierror.Append(merr, xerrors.Errorf("fetch error %s (storage %s) -> %s: %w", url, info.ID, tempDest, err))
-				continue
+			localExisted := false
+			err = FindAndMvFromLocal(url, tempDest)
+			if err == nil {
+				log.Infof("MvFromLocal success: %s -> %s", url, tempDest)
+				localExisted = true
+			}
+			
+			if !localExisted {
+				if err := os.RemoveAll(dest); err != nil {
+					return "", xerrors.Errorf("removing dest: %w", err)
+				}
+				err = r.fetch(ctx, url, tempDest)
+				if err != nil {
+					merr = multierror.Append(merr, xerrors.Errorf("fetch error %s (storage %s) -> %s: %w", url, info.ID, tempDest, err))
+					continue
+				}
 			}
 
 			if err := move(tempDest, dest); err != nil {
