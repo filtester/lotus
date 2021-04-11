@@ -201,7 +201,6 @@ func (r *Remote) acquireFromRemote(ctx context.Context, s abi.SectorID, fileType
 				return "", xerrors.Errorf("removing dest: %w", err)
 			}
 
-			err = r.fetch(ctx, url, tempDest)
 			localExisted := false
 			err = FindAndMvFromLocal(url, tempDest)
 			if err == nil {
