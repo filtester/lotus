@@ -118,7 +118,7 @@ func New(ctx context.Context, ls stores.LocalStorage, si stores.SectorIndex, sc 
 		return nil, xerrors.Errorf("creating prover instance: %w", err)
 	}
 
-	stor := stores.NewRemote(lstor, si, http.Header(sa), sc.ParallelFetchLimit, sc.AllowMoveSectorFromWorker)
+	stor := stores.NewRemote(lstor, si, http.Header(sa), sc.ParallelFetchLimit)
 
 	m := &Manager{
 		ls:         ls,

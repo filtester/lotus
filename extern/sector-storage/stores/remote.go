@@ -50,12 +50,11 @@ func (r *Remote) RemoveCopies(ctx context.Context, s abi.SectorID, types storifa
 	return r.local.RemoveCopies(ctx, s, types)
 }
 
-func NewRemote(local *Local, index SectorIndex, auth http.Header, fetchLimit int, allowMoveSectorFromWorker bool) *Remote {
+func NewRemote(local *Local, index SectorIndex, auth http.Header, fetchLimit int) *Remote {
 	return &Remote{
 		local:                     local,
 		index:                     index,
 		auth:                      auth,
-		allowMoveSectorFromWorker: allowMoveSectorFromWorker,
 		limit:                     make(chan struct{}, fetchLimit),
 
 		fetching: map[abi.SectorID]chan struct{}{},
@@ -202,7 +201,7 @@ func (r *Remote) acquireFromRemote(ctx context.Context, s abi.SectorID, fileType
 			}
 
 			localExisted := false
-			err = FindAndMvFromLocal(url, tempDest)
+			err = MvFromLocal(url, tempDest)
 			if err == nil {
 				log.Infof("MvFromLocal success: %s -> %s", url, tempDest)
 				localExisted = true
