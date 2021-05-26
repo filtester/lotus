@@ -489,7 +489,8 @@ func (l *LocalWorker) Info(context.Context) (storiface.WorkerInfo, error) {
 	if err != nil {
 		panic(err)
 	}
-
+	hostnameExt := os.Getenv("LOTUS_HOSTNAME_EXT")
+	hostname  += hostname + hostnameExt
 	gpus, err := ffi.GetGPUDevices()
 	if err != nil {
 		log.Errorf("getting gpu devices failed: %+v", err)
