@@ -93,6 +93,22 @@ func (r *Remote) AcquireSector(ctx context.Context, s storage.SectorRef, existin
 		r.fetchLk.Unlock()
 	}()
 
+
+	if len(r.limit) >= cap(r.limit) {
+		log.Infof("Throttling fetch, %d already running", len(r.limit))
+	}
+
+	// TODO: Smarter throttling
+	//  * Priority (just going sequentially is still pretty good)
+	//  * Per interface
+	//  * Aware of remote load
+	select {
+	case r.limit <- struct{}{}:
+		defer func() { <-r.limit }()
+	case <-ctx.Done():
+		return storiface.SectorPaths{}, storiface.SectorPaths{},xerrors.Errorf("context error while waiting for fetch limiter: %w", ctx.Err())
+	}
+
 	paths, stores, err := r.local.AcquireSector(ctx, s, existing, allocate, pathType, op)
 	if err != nil {
 		return storiface.SectorPaths{}, storiface.SectorPaths{}, xerrors.Errorf("local acquire error: %w", err)
@@ -235,20 +251,7 @@ func (r *Remote) acquireFromRemote(ctx context.Context, s abi.SectorID, fileType
 func (r *Remote) fetch(ctx context.Context, url, outname string) error {
 	log.Infof("Fetch %s -> %s", url, outname)
 
-	if len(r.limit) >= cap(r.limit) {
-		log.Infof("Throttling fetch, %d already running", len(r.limit))
-	}
 
-	// TODO: Smarter throttling
-	//  * Priority (just going sequentially is still pretty good)
-	//  * Per interface
-	//  * Aware of remote load
-	select {
-	case r.limit <- struct{}{}:
-		defer func() { <-r.limit }()
-	case <-ctx.Done():
-		return xerrors.Errorf("context error while waiting for fetch limiter: %w", ctx.Err())
-	}
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
