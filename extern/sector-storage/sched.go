@@ -345,6 +345,8 @@ func (sh *scheduler) trySched() {
 
 	*/
 
+	time.Sleep(time.Millisecond * 100)
+
 	sh.workersLk.RLock()
 	defer sh.workersLk.RUnlock()
 
