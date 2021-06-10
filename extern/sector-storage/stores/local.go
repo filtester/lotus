@@ -199,12 +199,12 @@ func (st *Local) OpenPath(ctx context.Context, p string) error {
 	}
 	hostname, _ := os.Hostname() // TODO: allow overriding from config
 	hostnameExt := os.Getenv("LOTUS_HOSTNAME_EXT")
-	hostname  += hostname + hostnameExt
+	hostname += hostnameExt
 
 	err = st.index.StorageAttach(ctx, StorageInfo{
 		ID:         meta.ID,
 		URLs:       st.urls,
-		Hostname: hostname,
+		Hostname:   hostname,
 		Weight:     meta.Weight,
 		MaxStorage: meta.MaxStorage,
 		CanSeal:    meta.CanSeal,
@@ -269,7 +269,7 @@ func (st *Local) Redeclare(ctx context.Context) error {
 
 		err = st.index.StorageAttach(ctx, StorageInfo{
 			ID:         id,
-			Hostname: hostname,
+			Hostname:   hostname,
 			URLs:       st.urls,
 			Weight:     meta.Weight,
 			MaxStorage: meta.MaxStorage,

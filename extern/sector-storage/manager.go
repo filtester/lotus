@@ -94,12 +94,12 @@ type SealerConfig struct {
 	ParallelFetchLimit int
 
 	// Local worker config
-	AllowAddPiece             bool
-	AllowPreCommit1           bool
-	AllowPreCommit2           bool
-	AllowCommit               bool
-	AllowUnseal               bool
-	AllowPreCommitSameHost    bool
+	AllowAddPiece          bool
+	AllowPreCommit1        bool
+	AllowPreCommit2        bool
+	AllowCommit            bool
+	AllowUnseal            bool
+	AllowPreCommitSameHost bool
 }
 
 type StorageAuth http.Header
@@ -445,6 +445,8 @@ func (m *Manager) SealPreCommit2(ctx context.Context, sector storage.SectorRef, 
 		log.Infof("SealCommit2, cachedStores count：%v", len(cachedStores))
 		if len(cachedStores) > 0 {
 			hostname = cachedStores[0].Hostname
+		} else {
+			return storage.SectorCids{}, xerrors.Errorf("but can not find cache")
 		}
 	}
 
