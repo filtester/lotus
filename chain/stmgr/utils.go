@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 
+	exported5 "github.com/filecoin-project/specs-actors/v5/actors/builtin/exported"
+
 	"github.com/filecoin-project/go-state-types/big"
 
 	"github.com/filecoin-project/go-state-types/network"
@@ -26,6 +28,7 @@ import (
 	exported0 "github.com/filecoin-project/specs-actors/actors/builtin/exported"
 	exported2 "github.com/filecoin-project/specs-actors/v2/actors/builtin/exported"
 	exported3 "github.com/filecoin-project/specs-actors/v3/actors/builtin/exported"
+	exported4 "github.com/filecoin-project/specs-actors/v4/actors/builtin/exported"
 
 	"github.com/filecoin-project/lotus/api"
 	"github.com/filecoin-project/lotus/chain/actors/builtin"
@@ -104,8 +107,7 @@ func GetPowerRaw(ctx context.Context, sm *StateManager, st cid.Cid, maddr addres
 		var found bool
 		mpow, found, err = pas.MinerPower(maddr)
 		if err != nil || !found {
-			// TODO: return an error when not found?
-			return power.Claim{}, power.Claim{}, false, err
+			return power.Claim{}, tpow, false, err
 		}
 
 		minpow, err = pas.MinerNominalPowerMeetsConsensusMinimum(maddr)
@@ -340,7 +342,7 @@ func ComputeState(ctx context.Context, sm *StateManager, height abi.ChainEpoch, 
 
 	for i := ts.Height(); i < height; i++ {
 		// handle state forks
-		base, err = sm.handleStateForks(ctx, base, i, traceFunc(&trace), ts)
+		base, err = sm.handleStateForks(ctx, base, i, &InvocationTracer{trace: &trace}, ts)
 		if err != nil {
 			return cid.Undef, nil, xerrors.Errorf("error handling state forks: %w", err)
 		}
@@ -548,6 +550,8 @@ func init() {
 	actors = append(actors, exported0.BuiltinActors()...)
 	actors = append(actors, exported2.BuiltinActors()...)
 	actors = append(actors, exported3.BuiltinActors()...)
+	actors = append(actors, exported4.BuiltinActors()...)
+	actors = append(actors, exported5.BuiltinActors()...)
 
 	for _, actor := range actors {
 		exports := actor.Exports()
