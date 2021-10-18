@@ -1,6 +1,7 @@
 package init
 
 import (
+	"github.com/filecoin-project/lotus/chain/actors"
 	"golang.org/x/xerrors"
 
 	"github.com/filecoin-project/go-address"
@@ -22,6 +23,8 @@ import (
 	builtin4 "github.com/filecoin-project/specs-actors/v4/actors/builtin"
 
 	builtin5 "github.com/filecoin-project/specs-actors/v5/actors/builtin"
+
+	builtin6 "github.com/filecoin-project/specs-actors/v6/actors/builtin"
 )
 
 func init() {
@@ -45,11 +48,15 @@ func init() {
 	builtin.RegisterActorState(builtin5.InitActorCodeID, func(store adt.Store, root cid.Cid) (cbor.Marshaler, error) {
 		return load5(store, root)
 	})
+
+	builtin.RegisterActorState(builtin6.InitActorCodeID, func(store adt.Store, root cid.Cid) (cbor.Marshaler, error) {
+		return load6(store, root)
+	})
 }
 
 var (
-	Address = builtin5.InitActorAddr
-	Methods = builtin5.MethodsInit
+	Address = builtin6.InitActorAddr
+	Methods = builtin6.MethodsInit
 )
 
 func Load(store adt.Store, act *types.Actor) (State, error) {
@@ -70,8 +77,62 @@ func Load(store adt.Store, act *types.Actor) (State, error) {
 	case builtin5.InitActorCodeID:
 		return load5(store, act.Head)
 
+	case builtin6.InitActorCodeID:
+		return load6(store, act.Head)
+
 	}
 	return nil, xerrors.Errorf("unknown actor code %s", act.Code)
+}
+
+func MakeState(store adt.Store, av actors.Version, networkName string) (State, error) {
+	switch av {
+
+	case actors.Version0:
+		return make0(store, networkName)
+
+	case actors.Version2:
+		return make2(store, networkName)
+
+	case actors.Version3:
+		return make3(store, networkName)
+
+	case actors.Version4:
+		return make4(store, networkName)
+
+	case actors.Version5:
+		return make5(store, networkName)
+
+	case actors.Version6:
+		return make6(store, networkName)
+
+	}
+	return nil, xerrors.Errorf("unknown actor version %d", av)
+}
+
+func GetActorCodeID(av actors.Version) (cid.Cid, error) {
+	switch av {
+
+	case actors.Version0:
+		return builtin0.InitActorCodeID, nil
+
+	case actors.Version2:
+		return builtin2.InitActorCodeID, nil
+
+	case actors.Version3:
+		return builtin3.InitActorCodeID, nil
+
+	case actors.Version4:
+		return builtin4.InitActorCodeID, nil
+
+	case actors.Version5:
+		return builtin5.InitActorCodeID, nil
+
+	case actors.Version6:
+		return builtin6.InitActorCodeID, nil
+
+	}
+
+	return cid.Undef, xerrors.Errorf("unknown actor version %d", av)
 }
 
 type State interface {
@@ -91,5 +152,12 @@ type State interface {
 	// Sets the network's name. This should only be used on upgrade/fork.
 	SetNetworkName(name string) error
 
-	addressMap() (adt.Map, error)
+	// Sets the next ID for the init actor. This should only be used for testing.
+	SetNextID(id abi.ActorID) error
+
+	// Sets the address map for the init actor. This should only be used for testing.
+	SetAddressMap(mcid cid.Cid) error
+
+	AddressMap() (adt.Map, error)
+	GetState() interface{}
 }

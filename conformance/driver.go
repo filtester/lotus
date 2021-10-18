@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/filecoin-project/lotus/blockstore"
+	"github.com/filecoin-project/lotus/chain/consensus/filcns"
 	"github.com/filecoin-project/lotus/chain/state"
 	"github.com/filecoin-project/lotus/chain/stmgr"
 	"github.com/filecoin-project/lotus/chain/store"
@@ -101,9 +102,13 @@ func (d *Driver) ExecuteTipset(bs blockstore.Blockstore, ds ds.Batching, params 
 		tipset   = params.Tipset
 		syscalls = vm.Syscalls(ffiwrapper.ProofVerifier)
 
-		cs = store.NewChainStore(bs, bs, ds, syscalls, nil)
-		sm = stmgr.NewStateManager(cs)
+		cs      = store.NewChainStore(bs, bs, ds, filcns.Weight, nil)
+		tse     = filcns.NewTipSetExecutor()
+		sm, err = stmgr.NewStateManager(cs, tse, syscalls, filcns.DefaultUpgradeSchedule(), nil)
 	)
+	if err != nil {
+		return nil, err
+	}
 
 	if params.Rand == nil {
 		params.Rand = NewFixedRand()
@@ -115,11 +120,10 @@ func (d *Driver) ExecuteTipset(bs blockstore.Blockstore, ds ds.Batching, params 
 
 	defer cs.Close() //nolint:errcheck
 
-	blocks := make([]store.BlockMessages, 0, len(tipset.Blocks))
+	blocks := make([]filcns.FilecoinBlockMessages, 0, len(tipset.Blocks))
 	for _, b := range tipset.Blocks {
 		sb := store.BlockMessages{
-			Miner:    b.MinerAddr,
-			WinCount: b.WinCount,
+			Miner: b.MinerAddr,
 		}
 		for _, m := range b.Messages {
 			msg, err := types.DecodeMessage(m)
@@ -138,20 +142,19 @@ func (d *Driver) ExecuteTipset(bs blockstore.Blockstore, ds ds.Batching, params 
 				sb.BlsMessages = append(sb.BlsMessages, msg)
 			}
 		}
-		blocks = append(blocks, sb)
+		blocks = append(blocks, filcns.FilecoinBlockMessages{
+			BlockMessages: sb,
+			WinCount:      b.WinCount,
+		})
 	}
 
-	var (
-		messages []*types.Message
-		results  []*vm.ApplyRet
-	)
-
-	recordOutputs := func(_ cid.Cid, msg *types.Message, ret *vm.ApplyRet) error {
-		messages = append(messages, msg)
-		results = append(results, ret)
-		return nil
+	recordOutputs := &outputRecorder{
+		messages: []*types.Message{},
+		results:  []*vm.ApplyRet{},
 	}
-	postcid, receiptsroot, err := sm.ApplyBlocks(context.Background(),
+
+	postcid, receiptsroot, err := tse.ApplyBlocks(context.Background(),
+		sm,
 		params.ParentEpoch,
 		params.Preroot,
 		blocks,
@@ -169,8 +172,8 @@ func (d *Driver) ExecuteTipset(bs blockstore.Blockstore, ds ds.Batching, params 
 	ret := &ExecuteTipsetResult{
 		ReceiptsRoot:    receiptsroot,
 		PostStateRoot:   postcid,
-		AppliedMessages: messages,
-		AppliedResults:  results,
+		AppliedMessages: recordOutputs.messages,
+		AppliedResults:  recordOutputs.results,
 	}
 	return ret, nil
 }
@@ -201,7 +204,10 @@ func (d *Driver) ExecuteMessage(bs blockstore.Blockstore, params ExecuteMessageP
 
 	// dummy state manager; only to reference the GetNetworkVersion method,
 	// which does not depend on state.
-	sm := stmgr.NewStateManager(nil)
+	sm, err := stmgr.NewStateManager(nil, filcns.NewTipSetExecutor(), nil, filcns.DefaultUpgradeSchedule(), nil)
+	if err != nil {
+		return nil, cid.Cid{}, err
+	}
 
 	vmOpts := &vm.VMOpts{
 		StateBase: params.Preroot,
@@ -221,7 +227,7 @@ func (d *Driver) ExecuteMessage(bs blockstore.Blockstore, params ExecuteMessageP
 		return nil, cid.Undef, err
 	}
 
-	invoker := vm.NewActorRegistry()
+	invoker := filcns.NewActorRegistry()
 
 	// register the chaos actor if required by the vector.
 	if chaosOn, ok := d.selector["chaos_actor"]; ok && chaosOn == "true" {
@@ -283,4 +289,15 @@ func CircSupplyOrDefault(circSupply *gobig.Int) abi.TokenAmount {
 		return DefaultCirculatingSupply
 	}
 	return big.NewFromGo(circSupply)
+}
+
+type outputRecorder struct {
+	messages []*types.Message
+	results  []*vm.ApplyRet
+}
+
+func (o *outputRecorder) MessageApplied(ctx context.Context, ts *types.TipSet, mcid cid.Cid, msg *types.Message, ret *vm.ApplyRet, implicit bool) error {
+	o.messages = append(o.messages, msg)
+	o.results = append(o.results, ret)
+	return nil
 }

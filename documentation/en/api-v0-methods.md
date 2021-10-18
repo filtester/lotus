@@ -17,6 +17,7 @@
   * [ChainGetBlockMessages](#ChainGetBlockMessages)
   * [ChainGetGenesis](#ChainGetGenesis)
   * [ChainGetMessage](#ChainGetMessage)
+  * [ChainGetMessagesInTipset](#ChainGetMessagesInTipset)
   * [ChainGetNode](#ChainGetNode)
   * [ChainGetParentMessages](#ChainGetParentMessages)
   * [ChainGetParentReceipts](#ChainGetParentReceipts)
@@ -44,11 +45,13 @@
   * [ClientGetDealInfo](#ClientGetDealInfo)
   * [ClientGetDealStatus](#ClientGetDealStatus)
   * [ClientGetDealUpdates](#ClientGetDealUpdates)
+  * [ClientGetRetrievalUpdates](#ClientGetRetrievalUpdates)
   * [ClientHasLocal](#ClientHasLocal)
   * [ClientImport](#ClientImport)
   * [ClientListDataTransfers](#ClientListDataTransfers)
   * [ClientListDeals](#ClientListDeals)
   * [ClientListImports](#ClientListImports)
+  * [ClientListRetrievals](#ClientListRetrievals)
   * [ClientMinerQueryOffer](#ClientMinerQueryOffer)
   * [ClientQueryAsk](#ClientQueryAsk)
   * [ClientRemoveImport](#ClientRemoveImport)
@@ -57,6 +60,7 @@
   * [ClientRetrieveTryRestartInsufficientFunds](#ClientRetrieveTryRestartInsufficientFunds)
   * [ClientRetrieveWithEvents](#ClientRetrieveWithEvents)
   * [ClientStartDeal](#ClientStartDeal)
+  * [ClientStatelessDeal](#ClientStatelessDeal)
 * [Create](#Create)
   * [CreateBackup](#CreateBackup)
 * [Gas](#Gas)
@@ -67,6 +71,7 @@
 * [I](#I)
   * [ID](#ID)
 * [Log](#Log)
+  * [LogAlerts](#LogAlerts)
   * [LogList](#LogList)
   * [LogSetLevel](#LogSetLevel)
 * [Market](#Market)
@@ -153,6 +158,8 @@
   * [StateDealProviderCollateralBounds](#StateDealProviderCollateralBounds)
   * [StateDecodeParams](#StateDecodeParams)
   * [StateGetActor](#StateGetActor)
+  * [StateGetRandomnessFromBeacon](#StateGetRandomnessFromBeacon)
+  * [StateGetRandomnessFromTickets](#StateGetRandomnessFromTickets)
   * [StateGetReceipt](#StateGetReceipt)
   * [StateListActors](#StateListActors)
   * [StateListMessages](#StateListMessages)
@@ -529,6 +536,28 @@ Response:
   }
 }
 ```
+
+### ChainGetMessagesInTipset
+ChainGetMessagesInTipset returns message stores in current tipset
+
+
+Perms: read
+
+Inputs:
+```json
+[
+  [
+    {
+      "/": "bafy2bzacea3wsdh6y3a36tb3skempjoxqpuyompjbmfeyf34fi3uy6uue42v4"
+    },
+    {
+      "/": "bafy2bzacebp3shtrn43k7g3unredz7fxn4gj533d3o43tqn2p2ipxxhrvchve"
+    }
+  ]
+]
+```
+
+Response: `null`
 
 ### ChainGetNode
 
@@ -1196,6 +1225,54 @@ Response:
 }
 ```
 
+### ClientGetRetrievalUpdates
+ClientGetRetrievalUpdates returns status of updated retrieval deals
+
+
+Perms: write
+
+Inputs: `null`
+
+Response:
+```json
+{
+  "PayloadCID": {
+    "/": "bafy2bzacea3wsdh6y3a36tb3skempjoxqpuyompjbmfeyf34fi3uy6uue42v4"
+  },
+  "ID": 5,
+  "PieceCID": null,
+  "PricePerByte": "0",
+  "UnsealPrice": "0",
+  "Status": 0,
+  "Message": "string value",
+  "Provider": "12D3KooWGzxzKZYveHXtpG6AsrUJBcWxHBFS2HsEoGTxrMLvKXtf",
+  "BytesReceived": 42,
+  "BytesPaidFor": 42,
+  "TotalPaid": "0",
+  "TransferChannelID": {
+    "Initiator": "12D3KooWGzxzKZYveHXtpG6AsrUJBcWxHBFS2HsEoGTxrMLvKXtf",
+    "Responder": "12D3KooWGzxzKZYveHXtpG6AsrUJBcWxHBFS2HsEoGTxrMLvKXtf",
+    "ID": 3
+  },
+  "DataTransfer": {
+    "TransferID": 3,
+    "Status": 1,
+    "BaseCID": {
+      "/": "bafy2bzacea3wsdh6y3a36tb3skempjoxqpuyompjbmfeyf34fi3uy6uue42v4"
+    },
+    "IsInitiator": true,
+    "IsSender": true,
+    "Voucher": "string value",
+    "Message": "string value",
+    "OtherPeer": "12D3KooWGzxzKZYveHXtpG6AsrUJBcWxHBFS2HsEoGTxrMLvKXtf",
+    "Transferred": 42,
+    "Stages": {
+      "Stages": null
+    }
+  }
+}
+```
+
 ### ClientHasLocal
 ClientHasLocal indicates whether a certain CID is locally stored.
 
@@ -1269,6 +1346,17 @@ Inputs: `null`
 
 Response: `null`
 
+### ClientListRetrievals
+ClientQueryAsk returns a signed StorageAsk from the specified miner.
+ClientListRetrievals returns information about retrievals made by the local client
+
+
+Perms: write
+
+Inputs: `null`
+
+Response: `null`
+
 ### ClientMinerQueryOffer
 ClientMinerQueryOffer returns a QueryOffer for the specific miner and file.
 
@@ -1309,7 +1397,6 @@ Response:
 ```
 
 ### ClientQueryAsk
-ClientQueryAsk returns a signed StorageAsk from the specified miner.
 
 
 Perms: read
@@ -1383,7 +1470,7 @@ Inputs:
     },
     "Piece": null,
     "Size": 42,
-    "LocalStore": 12,
+    "FromLocalCAR": "string value",
     "Total": "0",
     "UnsealPrice": "0",
     "PaymentInterval": 42,
@@ -1437,7 +1524,7 @@ Inputs:
     },
     "Piece": null,
     "Size": 42,
-    "LocalStore": 12,
+    "FromLocalCAR": "string value",
     "Total": "0",
     "UnsealPrice": "0",
     "PaymentInterval": 42,
@@ -1473,6 +1560,39 @@ ClientStartDeal proposes a deal with a miner.
 
 
 Perms: admin
+
+Inputs:
+```json
+[
+  {
+    "Data": {
+      "TransferType": "string value",
+      "Root": {
+        "/": "bafy2bzacea3wsdh6y3a36tb3skempjoxqpuyompjbmfeyf34fi3uy6uue42v4"
+      },
+      "PieceCid": null,
+      "PieceSize": 1024,
+      "RawBlockSize": 42
+    },
+    "Wallet": "f01234",
+    "Miner": "f01234",
+    "EpochPrice": "0",
+    "MinBlocksDuration": 42,
+    "ProviderCollateral": "0",
+    "DealStartEpoch": 10101,
+    "FastRetrieval": true,
+    "VerifiedDeal": true
+  }
+]
+```
+
+Response: `null`
+
+### ClientStatelessDeal
+ClientStatelessDeal fire-and-forget-proposes an offline deal to a miner without subsequent tracking.
+
+
+Perms: write
 
 Inputs:
 ```json
@@ -1698,6 +1818,15 @@ Response: `"12D3KooWGzxzKZYveHXtpG6AsrUJBcWxHBFS2HsEoGTxrMLvKXtf"`
 
 ## Log
 
+
+### LogAlerts
+
+
+Perms: admin
+
+Inputs: `null`
+
+Response: `null`
 
 ### LogList
 
@@ -2411,7 +2540,7 @@ using both transaction ID and a hash of the parameters used in the
 proposal. This method of approval can be used to ensure you only approve
 exactly the transaction you think you are.
 It takes the following params: <multisig address>, <proposed message ID>, <proposer address>, <recipient address>, <value to transfer>,
-<sender address of the approve msg>, <method to call in the proposed message>, <params to include in the proposed message>
+<sender address of the approve msg>, <method to call in the approved message>, <params to include in the proposed message>
 
 
 Perms: sign
@@ -2747,8 +2876,8 @@ Inputs: `null`
 Response:
 ```json
 {
-  "Addrs": null,
-  "ID": "12D3KooWGzxzKZYveHXtpG6AsrUJBcWxHBFS2HsEoGTxrMLvKXtf"
+  "ID": "12D3KooWGzxzKZYveHXtpG6AsrUJBcWxHBFS2HsEoGTxrMLvKXtf",
+  "Addrs": []
 }
 ```
 
@@ -2897,8 +3026,8 @@ Inputs:
 ```json
 [
   {
-    "Addrs": null,
-    "ID": "12D3KooWGzxzKZYveHXtpG6AsrUJBcWxHBFS2HsEoGTxrMLvKXtf"
+    "ID": "12D3KooWGzxzKZYveHXtpG6AsrUJBcWxHBFS2HsEoGTxrMLvKXtf",
+    "Addrs": []
   }
 ]
 ```
@@ -2948,8 +3077,8 @@ Inputs:
 Response:
 ```json
 {
-  "Addrs": null,
-  "ID": "12D3KooWGzxzKZYveHXtpG6AsrUJBcWxHBFS2HsEoGTxrMLvKXtf"
+  "ID": "12D3KooWGzxzKZYveHXtpG6AsrUJBcWxHBFS2HsEoGTxrMLvKXtf",
+  "Addrs": []
 }
 ```
 
@@ -3780,6 +3909,56 @@ Response:
 }
 ```
 
+### StateGetRandomnessFromBeacon
+StateGetRandomnessFromBeacon is used to sample the beacon for randomness.
+
+
+Perms: read
+
+Inputs:
+```json
+[
+  2,
+  10101,
+  "Ynl0ZSBhcnJheQ==",
+  [
+    {
+      "/": "bafy2bzacea3wsdh6y3a36tb3skempjoxqpuyompjbmfeyf34fi3uy6uue42v4"
+    },
+    {
+      "/": "bafy2bzacebp3shtrn43k7g3unredz7fxn4gj533d3o43tqn2p2ipxxhrvchve"
+    }
+  ]
+]
+```
+
+Response: `null`
+
+### StateGetRandomnessFromTickets
+StateGetRandomnessFromTickets is used to sample the chain for randomness.
+
+
+Perms: read
+
+Inputs:
+```json
+[
+  2,
+  10101,
+  "Ynl0ZSBhcnJheQ==",
+  [
+    {
+      "/": "bafy2bzacea3wsdh6y3a36tb3skempjoxqpuyompjbmfeyf34fi3uy6uue42v4"
+    },
+    {
+      "/": "bafy2bzacebp3shtrn43k7g3unredz7fxn4gj533d3o43tqn2p2ipxxhrvchve"
+    }
+  ]
+]
+```
+
+Response: `null`
+
 ### StateGetReceipt
 StateGetReceipt returns the message receipt for the given message or for a
 matching gas-repriced replacing message
@@ -4517,7 +4696,7 @@ Inputs:
 ]
 ```
 
-Response: `13`
+Response: `14`
 
 ### StateReadState
 StateReadState returns the indicated actor's state.

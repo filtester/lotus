@@ -6,8 +6,11 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"os"
 	"sync"
 	"time"
+
+	lrand "github.com/filecoin-project/lotus/chain/rand"
 
 	"github.com/filecoin-project/lotus/api/v1api"
 
@@ -26,7 +29,6 @@ import (
 	"github.com/filecoin-project/lotus/api"
 	"github.com/filecoin-project/lotus/build"
 	"github.com/filecoin-project/lotus/chain/gen"
-	"github.com/filecoin-project/lotus/chain/store"
 	"github.com/filecoin-project/lotus/chain/types"
 	"github.com/filecoin-project/lotus/journal"
 
@@ -325,7 +327,9 @@ minerLoop:
 
 			if err := m.sf.MinedBlock(b.Header, base.TipSet.Height()+base.NullRounds); err != nil {
 				log.Errorf("<!!> SLASH FILTER ERROR: %s", err)
-				continue
+				if os.Getenv("LOTUS_MINER_NO_SLASHFILTER") != "_yes_i_know_i_can_and_probably_will_lose_all_my_fil_and_power_" {
+					continue
+				}
 			}
 
 			blkKey := fmt.Sprintf("%d", b.Header.Height)
@@ -419,7 +423,7 @@ func (m *Miner) GetBestMiningCandidate(ctx context.Context) (*MiningBase, error)
 //  1.
 func (m *Miner) mineOne(ctx context.Context, base *MiningBase) (minedBlock *types.BlockMsg, err error) {
 	log.Debugw("attempting to mine a block", "tipset", types.LogCids(base.TipSet.Cids()))
-	start := build.Clock.Now()
+	tStart := build.Clock.Now()
 
 	round := base.TipSet.Height() + base.NullRounds + 1
 
@@ -428,6 +432,9 @@ func (m *Miner) mineOne(ctx context.Context, base *MiningBase) (minedBlock *type
 	var mbi *api.MiningBaseInfo
 	var rbase types.BeaconEntry
 	defer func() {
+
+		var hasMinPower bool
+
 		// mbi can be nil if we are deep in penalty and there are 0 eligible sectors
 		// in the current deadline. If this case - put together a dummy one for reporting
 		// https://github.com/filecoin-project/lotus/blob/v1.9.0/chain/stmgr/utils.go#L500-L502
@@ -435,17 +442,24 @@ func (m *Miner) mineOne(ctx context.Context, base *MiningBase) (minedBlock *type
 			mbi = &api.MiningBaseInfo{
 				NetworkPower:      big.NewInt(-1), // we do not know how big the network is at this point
 				EligibleForMining: false,
-				MinerPower:        big.NewInt(0), // but we do know we do not have anything
+				MinerPower:        big.NewInt(0), // but we do know we do not have anything eligible
+			}
+
+			// try to opportunistically pull actual power and plug it into the fake mbi
+			if pow, err := m.api.StateMinerPower(ctx, m.address, base.TipSet.Key()); err == nil && pow != nil {
+				hasMinPower = pow.HasMinPower
+				mbi.MinerPower = pow.MinerPower.QualityAdjPower
+				mbi.NetworkPower = pow.TotalPower.QualityAdjPower
 			}
 		}
 
-		isLate := uint64(start.Unix()) > (base.TipSet.MinTimestamp() + uint64(base.NullRounds*builtin.EpochDurationSeconds) + build.PropagationDelaySecs)
+		isLate := uint64(tStart.Unix()) > (base.TipSet.MinTimestamp() + uint64(base.NullRounds*builtin.EpochDurationSeconds) + build.PropagationDelaySecs)
 
 		logStruct := []interface{}{
-			"tookMilliseconds", (build.Clock.Now().UnixNano() - start.UnixNano()) / 1_000_000,
+			"tookMilliseconds", (build.Clock.Now().UnixNano() - tStart.UnixNano()) / 1_000_000,
 			"forRound", int64(round),
 			"baseEpoch", int64(base.TipSet.Height()),
-			"baseDeltaSeconds", uint64(start.Unix()) - base.TipSet.MinTimestamp(),
+			"baseDeltaSeconds", uint64(tStart.Unix()) - base.TipSet.MinTimestamp(),
 			"nullRounds", int64(base.NullRounds),
 			"lateStart", isLate,
 			"beaconEpoch", rbase.Round,
@@ -459,7 +473,7 @@ func (m *Miner) mineOne(ctx context.Context, base *MiningBase) (minedBlock *type
 
 		if err != nil {
 			log.Errorw("completed mineOne", logStruct...)
-		} else if isLate {
+		} else if isLate || (hasMinPower && !mbi.EligibleForMining) {
 			log.Warnw("completed mineOne", logStruct...)
 		} else {
 			log.Infow("completed mineOne", logStruct...)
@@ -480,16 +494,10 @@ func (m *Miner) mineOne(ctx context.Context, base *MiningBase) (minedBlock *type
 		return nil, nil
 	}
 
-	tMBI := build.Clock.Now()
-
-	beaconPrev := mbi.PrevBeaconEntry
-
-	tDrand := build.Clock.Now()
-	bvals := mbi.BeaconEntries
-
 	tPowercheck := build.Clock.Now()
 
-	rbase = beaconPrev
+	bvals := mbi.BeaconEntries
+	rbase = mbi.PrevBeaconEntry
 	if len(bvals) > 0 {
 		rbase = bvals[len(bvals)-1]
 	}
@@ -518,7 +526,7 @@ func (m *Miner) mineOne(ctx context.Context, base *MiningBase) (minedBlock *type
 		return nil, err
 	}
 
-	rand, err := store.DrawRandomness(rbase.Data, crypto.DomainSeparationTag_WinningPoStChallengeSeed, round, buf.Bytes())
+	rand, err := lrand.DrawRandomness(rbase.Data, crypto.DomainSeparationTag_WinningPoStChallengeSeed, round, buf.Bytes())
 	if err != nil {
 		err = xerrors.Errorf("failed to get randomness for winning post: %w", err)
 		return nil, err
@@ -553,7 +561,7 @@ func (m *Miner) mineOne(ctx context.Context, base *MiningBase) (minedBlock *type
 	}
 
 	tCreateBlock := build.Clock.Now()
-	dur := tCreateBlock.Sub(start)
+	dur := tCreateBlock.Sub(tStart)
 	parentMiners := make([]address.Address, len(base.TipSet.Blocks()))
 	for i, header := range base.TipSet.Blocks() {
 		parentMiners[i] = header.Miner
@@ -561,9 +569,7 @@ func (m *Miner) mineOne(ctx context.Context, base *MiningBase) (minedBlock *type
 	log.Infow("mined new block", "cid", minedBlock.Cid(), "height", int64(minedBlock.Header.Height), "miner", minedBlock.Header.Miner, "parents", parentMiners, "parentTipset", base.TipSet.Key().String(), "took", dur)
 	if dur > time.Second*time.Duration(build.BlockDelaySecs) {
 		log.Warnw("CAUTION: block production took longer than the block delay. Your computer may not be fast enough to keep up",
-			"tMinerBaseInfo ", tMBI.Sub(start),
-			"tDrand ", tDrand.Sub(tMBI),
-			"tPowercheck ", tPowercheck.Sub(tDrand),
+			"tPowercheck ", tPowercheck.Sub(tStart),
 			"tTicket ", tTicket.Sub(tPowercheck),
 			"tSeed ", tSeed.Sub(tTicket),
 			"tProof ", tProof.Sub(tSeed),
@@ -585,7 +591,7 @@ func (m *Miner) computeTicket(ctx context.Context, brand *types.BeaconEntry, bas
 		buf.Write(base.TipSet.MinTicket().VRFProof)
 	}
 
-	input, err := store.DrawRandomness(brand.Data, crypto.DomainSeparationTag_TicketProduction, round-build.TicketRandomnessLookback, buf.Bytes())
+	input, err := lrand.DrawRandomness(brand.Data, crypto.DomainSeparationTag_TicketProduction, round-build.TicketRandomnessLookback, buf.Bytes())
 	if err != nil {
 		return nil, err
 	}

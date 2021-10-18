@@ -1,3 +1,4 @@
+//go:build !nodaemon
 // +build !nodaemon
 
 package main
@@ -15,6 +16,7 @@ import (
 	"runtime/pprof"
 	"strings"
 
+	"github.com/filecoin-project/go-jsonrpc"
 	paramfetch "github.com/filecoin-project/go-paramfetch"
 	metricsprom "github.com/ipfs/go-metrics-prometheus"
 	"github.com/mitchellh/go-homedir"
@@ -29,6 +31,7 @@ import (
 
 	"github.com/filecoin-project/lotus/api"
 	"github.com/filecoin-project/lotus/build"
+	"github.com/filecoin-project/lotus/chain/consensus/filcns"
 	"github.com/filecoin-project/lotus/chain/stmgr"
 	"github.com/filecoin-project/lotus/chain/store"
 	"github.com/filecoin-project/lotus/chain/types"
@@ -36,6 +39,7 @@ import (
 	lcli "github.com/filecoin-project/lotus/cli"
 	"github.com/filecoin-project/lotus/extern/sector-storage/ffiwrapper"
 	"github.com/filecoin-project/lotus/journal"
+	"github.com/filecoin-project/lotus/journal/fsjournal"
 	"github.com/filecoin-project/lotus/lib/peermgr"
 	"github.com/filecoin-project/lotus/lib/ulimit"
 	"github.com/filecoin-project/lotus/metrics"
@@ -313,7 +317,7 @@ var DaemonCmd = &cli.Command{
 		stop, err := node.New(ctx,
 			node.FullAPI(&api, node.Lite(isLite)),
 
-			node.Online(),
+			node.Base(),
 			node.Repo(r),
 
 			node.Override(new(dtypes.Bootstrapper), isBootstrapper),
@@ -351,8 +355,37 @@ var DaemonCmd = &cli.Command{
 			return xerrors.Errorf("getting api endpoint: %w", err)
 		}
 
+		//
+		// Instantiate JSON-RPC endpoint.
+		// ----
+
+		// Populate JSON-RPC options.
+		serverOptions := make([]jsonrpc.ServerOption, 0)
+		if maxRequestSize := cctx.Int("api-max-req-size"); maxRequestSize != 0 {
+			serverOptions = append(serverOptions, jsonrpc.WithMaxRequestSize(int64(maxRequestSize)))
+		}
+
+		// Instantiate the full node handler.
+		h, err := node.FullNodeHandler(api, true, serverOptions...)
+		if err != nil {
+			return fmt.Errorf("failed to instantiate rpc handler: %s", err)
+		}
+
+		// Serve the RPC.
+		rpcStopper, err := node.ServeRPC(h, "lotus-daemon", endpoint)
+		if err != nil {
+			return fmt.Errorf("failed to start json-rpc endpoint: %s", err)
+		}
+
+		// Monitor for shutdown.
+		finishCh := node.MonitorShutdown(shutdownChan,
+			node.ShutdownHandler{Component: "rpc server", StopFunc: rpcStopper},
+			node.ShutdownHandler{Component: "node", StopFunc: stop},
+		)
+		<-finishCh // fires when shutdown is complete.
+
 		// TODO: properly parse api endpoint (or make it a URL)
-		return serveRPC(api, stop, endpoint, shutdownChan, int64(cctx.Int("api-max-req-size")))
+		return nil
 	},
 	Subcommands: []*cli.Command{
 		daemonStopCmd,
@@ -446,12 +479,12 @@ func ImportChain(ctx context.Context, r repo.Repo, fname string, snapshot bool) 
 		return err
 	}
 
-	j, err := journal.OpenFSJournal(lr, journal.EnvDisabledEvents())
+	j, err := fsjournal.OpenFSJournal(lr, journal.EnvDisabledEvents())
 	if err != nil {
 		return xerrors.Errorf("failed to open journal: %w", err)
 	}
 
-	cst := store.NewChainStore(bs, bs, mds, vm.Syscalls(ffiwrapper.ProofVerifier), j)
+	cst := store.NewChainStore(bs, bs, mds, filcns.Weight, j)
 	defer cst.Close() //nolint:errcheck
 
 	log.Infof("importing chain from %s...", fname)
@@ -487,7 +520,11 @@ func ImportChain(ctx context.Context, r repo.Repo, fname string, snapshot bool) 
 		return err
 	}
 
-	stm := stmgr.NewStateManager(cst)
+	// TODO: We need to supply the actual beacon after v14
+	stm, err := stmgr.NewStateManager(cst, filcns.NewTipSetExecutor(), vm.Syscalls(ffiwrapper.ProofVerifier), filcns.DefaultUpgradeSchedule(), nil)
+	if err != nil {
+		return err
+	}
 
 	if !snapshot {
 		log.Infof("validating imported chain...")

@@ -28,7 +28,8 @@ var verifRegCmd = &cli.Command{
 	Usage: "Interact with the verified registry actor",
 	Flags: []cli.Flag{},
 	Subcommands: []*cli.Command{
-		verifRegAddVerifierCmd,
+		verifRegAddVerifierFromMsigCmd,
+		verifRegAddVerifierFromAccountCmd,
 		verifRegVerifyClientCmd,
 		verifRegListVerifiersCmd,
 		verifRegListClientsCmd,
@@ -37,10 +38,83 @@ var verifRegCmd = &cli.Command{
 	},
 }
 
-var verifRegAddVerifierCmd = &cli.Command{
+var verifRegAddVerifierFromMsigCmd = &cli.Command{
 	Name:      "add-verifier",
 	Usage:     "make a given account a verifier",
 	ArgsUsage: "<message sender> <new verifier> <allowance>",
+	Action: func(cctx *cli.Context) error {
+		if cctx.Args().Len() != 3 {
+			return fmt.Errorf("must specify three arguments: sender, verifier, and allowance")
+		}
+
+		sender, err := address.NewFromString(cctx.Args().Get(0))
+		if err != nil {
+			return err
+		}
+
+		verifier, err := address.NewFromString(cctx.Args().Get(1))
+		if err != nil {
+			return err
+		}
+
+		allowance, err := types.BigFromString(cctx.Args().Get(2))
+		if err != nil {
+			return err
+		}
+
+		// TODO: ActorUpgrade: Abstract
+		params, err := actors.SerializeParams(&verifreg2.AddVerifierParams{Address: verifier, Allowance: allowance})
+		if err != nil {
+			return err
+		}
+
+		srv, err := lcli.GetFullNodeServices(cctx)
+		if err != nil {
+			return err
+		}
+		defer srv.Close() //nolint:errcheck
+
+		api := srv.FullNodeAPI()
+		ctx := lcli.ReqContext(cctx)
+
+		vrk, err := api.StateVerifiedRegistryRootKey(ctx, types.EmptyTSK)
+		if err != nil {
+			return err
+		}
+
+		proto, err := api.MsigPropose(ctx, vrk, verifreg.Address, big.Zero(), sender, uint64(verifreg.Methods.AddVerifier), params)
+		if err != nil {
+			return err
+		}
+
+		sm, _, err := srv.PublishMessage(ctx, proto, false)
+		if err != nil {
+			return err
+		}
+
+		msgCid := sm.Cid()
+
+		fmt.Printf("message sent, now waiting on cid: %s\n", msgCid)
+
+		mwait, err := api.StateWaitMsg(ctx, msgCid, uint64(cctx.Int("confidence")), build.Finality, true)
+		if err != nil {
+			return err
+		}
+
+		if mwait.Receipt.ExitCode != 0 {
+			return fmt.Errorf("failed to add verifier: %d", mwait.Receipt.ExitCode)
+		}
+
+		//TODO: Internal msg might still have failed
+		return nil
+
+	},
+}
+
+var verifRegAddVerifierFromAccountCmd = &cli.Command{
+	Name:      "add-verifier-from-account",
+	Usage:     "make a given account a verifier",
+	ArgsUsage: "<verifier root key> <new verifier> <allowance>",
 	Action: func(cctx *cli.Context) error {
 		if cctx.Args().Len() != 3 {
 			return fmt.Errorf("must specify three arguments: sender, verifier, and allowance")
@@ -74,28 +148,29 @@ var verifRegAddVerifierCmd = &cli.Command{
 		defer closer()
 		ctx := lcli.ReqContext(cctx)
 
-		vrk, err := api.StateVerifiedRegistryRootKey(ctx, types.EmptyTSK)
+		msg := &types.Message{
+			To:     verifreg.Address,
+			From:   sender,
+			Method: verifreg.Methods.AddVerifier,
+			Params: params,
+		}
+
+		smsg, err := api.MpoolPushMessage(ctx, msg, nil)
 		if err != nil {
 			return err
 		}
 
-		smsg, err := api.MsigPropose(ctx, vrk, verifreg.Address, big.Zero(), sender, uint64(verifreg.Methods.AddVerifier), params)
-		if err != nil {
-			return err
-		}
+		fmt.Printf("message sent, now waiting on cid: %s\n", smsg.Cid())
 
-		fmt.Printf("message sent, now waiting on cid: %s\n", smsg)
-
-		mwait, err := api.StateWaitMsg(ctx, smsg, build.MessageConfidence)
+		mwait, err := api.StateWaitMsg(ctx, smsg.Cid(), build.MessageConfidence)
 		if err != nil {
 			return err
 		}
 
 		if mwait.Receipt.ExitCode != 0 {
-			return fmt.Errorf("failed to add verifier: %d", mwait.Receipt.ExitCode)
+			return fmt.Errorf("failed to add verified client: %d", mwait.Receipt.ExitCode)
 		}
 
-		//TODO: Internal msg might still have failed
 		return nil
 
 	},

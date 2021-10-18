@@ -21,7 +21,7 @@ import (
 type SyncAPI struct {
 	fx.In
 
-	SlashFilter *slashfilter.SlashFilter
+	SlashFilter *slashfilter.SlashFilter `optional:"true"`
 	Syncer      *chain.Syncer
 	PubSub      *pubsub.PubSub
 	NetName     dtypes.NetworkName
@@ -56,9 +56,11 @@ func (a *SyncAPI) SyncSubmitBlock(ctx context.Context, blk *types.BlockMsg) erro
 		return xerrors.Errorf("loading parent block: %w", err)
 	}
 
-	if err := a.SlashFilter.MinedBlock(blk.Header, parent.Height); err != nil {
-		log.Errorf("<!!> SLASH FILTER ERROR: %s", err)
-		return xerrors.Errorf("<!!> SLASH FILTER ERROR: %w", err)
+	if a.SlashFilter != nil {
+		if err := a.SlashFilter.MinedBlock(blk.Header, parent.Height); err != nil {
+			log.Errorf("<!!> SLASH FILTER ERROR: %s", err)
+			return xerrors.Errorf("<!!> SLASH FILTER ERROR: %w", err)
+		}
 	}
 
 	// TODO: should we have some sort of fast path to adding a local block?
@@ -104,7 +106,7 @@ func (a *SyncAPI) SyncIncomingBlocks(ctx context.Context) (<-chan *types.BlockHe
 
 func (a *SyncAPI) SyncCheckpoint(ctx context.Context, tsk types.TipSetKey) error {
 	log.Warnf("Marking tipset %s as checkpoint", tsk)
-	return a.Syncer.SetCheckpoint(tsk)
+	return a.Syncer.SyncCheckpoint(ctx, tsk)
 }
 
 func (a *SyncAPI) SyncMarkBad(ctx context.Context, bcid cid.Cid) error {

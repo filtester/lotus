@@ -113,7 +113,7 @@ var fsmPlanners = map[SectorState]func(events []statemachine.Event, state *Secto
 		on(SectorCommitFailed{}, CommitFailed),
 	),
 	SubmitCommitAggregate: planOne(
-		on(SectorCommitAggregateSent{}, CommitWait),
+		on(SectorCommitAggregateSent{}, CommitAggregateWait),
 		on(SectorCommitFailed{}, CommitFailed),
 		on(SectorRetrySubmitCommit{}, SubmitCommit),
 	),
@@ -157,7 +157,7 @@ var fsmPlanners = map[SectorState]func(events []statemachine.Event, state *Secto
 		on(SectorSealPreCommit1Failed{}, SealPreCommit1Failed),
 	),
 	CommitFinalizeFailed: planOne(
-		on(SectorRetryFinalize{}, CommitFinalizeFailed),
+		on(SectorRetryFinalize{}, CommitFinalize),
 	),
 	CommitFailed: planOne(
 		on(SectorSealPreCommit1Failed{}, SealPreCommit1Failed),
@@ -351,6 +351,13 @@ func (m *Sealing) plan(events []statemachine.Event, state *SectorInfo) (func(sta
 		log.Errorw("update sector stats", "error", err)
 	}
 
+	// todo: drop this, use Context iface everywhere
+	wrapCtx := func(f func(Context, SectorInfo) error) func(statemachine.Context, SectorInfo) error {
+		return func(ctx statemachine.Context, info SectorInfo) error {
+			return f(&ctx, info)
+		}
+	}
+
 	switch state.State {
 	// Happy path
 	case Empty:
@@ -413,7 +420,7 @@ func (m *Sealing) plan(events []statemachine.Event, state *SectorInfo) (func(sta
 	case DealsExpired:
 		return m.handleDealsExpired, processed, nil
 	case RecoverDealIDs:
-		return m.handleRecoverDealIDs, processed, nil
+		return wrapCtx(m.HandleRecoverDealIDs), processed, nil
 
 	// Post-seal
 	case Proving:
@@ -461,15 +468,16 @@ func (m *Sealing) onUpdateSector(ctx context.Context, state *SectorInfo) error {
 	if err != nil {
 		return xerrors.Errorf("getting config: %w", err)
 	}
-	sp, err := m.currentSealProof(ctx)
-	if err != nil {
-		return xerrors.Errorf("getting seal proof type: %w", err)
-	}
 
 	shouldUpdateInput := m.stats.updateSector(cfg, m.minerSectorID(state.SectorNumber), state.State)
 
 	// trigger more input processing when we've dipped below max sealing limits
 	if shouldUpdateInput {
+		sp, err := m.currentSealProof(ctx)
+		if err != nil {
+			return xerrors.Errorf("getting seal proof type: %w", err)
+		}
+
 		go func() {
 			m.inputLk.Lock()
 			defer m.inputLk.Unlock()

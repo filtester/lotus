@@ -3,8 +3,10 @@ package stores
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -35,7 +37,18 @@ func move(from, to string) error {
 	//  can do better
 
 	var errOut bytes.Buffer
-	cmd := exec.Command("/usr/bin/env", "mv", "-t", toDir, from) // nolint
+
+	var cmd *exec.Cmd
+	if runtime.GOOS == "darwin" {
+		if err := os.MkdirAll(toDir, 0777); err != nil {
+			return xerrors.Errorf("failed exec MkdirAll: %s", err)
+		}
+
+		cmd = exec.Command("/usr/bin/env", "mv", from, toDir) // nolint
+	} else {
+		cmd = exec.Command("/usr/bin/env", "mv", "-t", toDir, from) // nolint
+	}
+
 	cmd.Stderr = &errOut
 	if err := cmd.Run(); err != nil {
 		return xerrors.Errorf("exec mv (stderr: %s): %w", strings.TrimSpace(errOut.String()), err)
@@ -43,8 +56,6 @@ func move(from, to string) error {
 
 	return nil
 }
-
-
 
 func MvFromLocal(url, dest string) error {
 	prefixStr := "remote/"
@@ -72,7 +83,7 @@ func MvFromLocal(url, dest string) error {
 	}
 	srcFile := rows[1]
 
-	log.Infof("MvFromLocal,move %s -> %s ", srcFile,out)
+	log.Infof("MvFromLocal,move %s -> %s ", srcFile, out)
 
 	cmdMv := exec.Command("mv", srcFile, dest)
 	out, errMv := cmdMv.CombinedOutput()

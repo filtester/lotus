@@ -2,6 +2,7 @@ package reward
 
 import (
 	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/lotus/chain/actors"
 	reward0 "github.com/filecoin-project/specs-actors/actors/builtin/reward"
 	"github.com/ipfs/go-cid"
 	"golang.org/x/xerrors"
@@ -17,6 +18,8 @@ import (
 	builtin4 "github.com/filecoin-project/specs-actors/v4/actors/builtin"
 
 	builtin5 "github.com/filecoin-project/specs-actors/v5/actors/builtin"
+
+	builtin6 "github.com/filecoin-project/specs-actors/v6/actors/builtin"
 
 	"github.com/filecoin-project/lotus/chain/actors/adt"
 	"github.com/filecoin-project/lotus/chain/actors/builtin"
@@ -44,11 +47,15 @@ func init() {
 	builtin.RegisterActorState(builtin5.RewardActorCodeID, func(store adt.Store, root cid.Cid) (cbor.Marshaler, error) {
 		return load5(store, root)
 	})
+
+	builtin.RegisterActorState(builtin6.RewardActorCodeID, func(store adt.Store, root cid.Cid) (cbor.Marshaler, error) {
+		return load6(store, root)
+	})
 }
 
 var (
-	Address = builtin5.RewardActorAddr
-	Methods = builtin5.MethodsReward
+	Address = builtin6.RewardActorAddr
+	Methods = builtin6.MethodsReward
 )
 
 func Load(store adt.Store, act *types.Actor) (State, error) {
@@ -69,8 +76,62 @@ func Load(store adt.Store, act *types.Actor) (State, error) {
 	case builtin5.RewardActorCodeID:
 		return load5(store, act.Head)
 
+	case builtin6.RewardActorCodeID:
+		return load6(store, act.Head)
+
 	}
 	return nil, xerrors.Errorf("unknown actor code %s", act.Code)
+}
+
+func MakeState(store adt.Store, av actors.Version, currRealizedPower abi.StoragePower) (State, error) {
+	switch av {
+
+	case actors.Version0:
+		return make0(store, currRealizedPower)
+
+	case actors.Version2:
+		return make2(store, currRealizedPower)
+
+	case actors.Version3:
+		return make3(store, currRealizedPower)
+
+	case actors.Version4:
+		return make4(store, currRealizedPower)
+
+	case actors.Version5:
+		return make5(store, currRealizedPower)
+
+	case actors.Version6:
+		return make6(store, currRealizedPower)
+
+	}
+	return nil, xerrors.Errorf("unknown actor version %d", av)
+}
+
+func GetActorCodeID(av actors.Version) (cid.Cid, error) {
+	switch av {
+
+	case actors.Version0:
+		return builtin0.RewardActorCodeID, nil
+
+	case actors.Version2:
+		return builtin2.RewardActorCodeID, nil
+
+	case actors.Version3:
+		return builtin3.RewardActorCodeID, nil
+
+	case actors.Version4:
+		return builtin4.RewardActorCodeID, nil
+
+	case actors.Version5:
+		return builtin5.RewardActorCodeID, nil
+
+	case actors.Version6:
+		return builtin6.RewardActorCodeID, nil
+
+	}
+
+	return cid.Undef, xerrors.Errorf("unknown actor version %d", av)
 }
 
 type State interface {
@@ -90,6 +151,7 @@ type State interface {
 
 	InitialPledgeForPower(abi.StoragePower, abi.TokenAmount, *builtin.FilterEstimate, abi.TokenAmount) (abi.TokenAmount, error)
 	PreCommitDepositForPower(builtin.FilterEstimate, abi.StoragePower) (abi.TokenAmount, error)
+	GetState() interface{}
 }
 
 type AwardBlockRewardParams = reward0.AwardBlockRewardParams

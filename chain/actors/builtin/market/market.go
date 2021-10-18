@@ -1,10 +1,12 @@
 package market
 
 import (
+	"github.com/filecoin-project/go-state-types/network"
 	"golang.org/x/xerrors"
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/go-state-types/cbor"
 	"github.com/ipfs/go-cid"
 	cbg "github.com/whyrusleeping/cbor-gen"
@@ -21,6 +23,9 @@ import (
 
 	builtin5 "github.com/filecoin-project/specs-actors/v5/actors/builtin"
 
+	builtin6 "github.com/filecoin-project/specs-actors/v6/actors/builtin"
+
+	"github.com/filecoin-project/lotus/chain/actors"
 	"github.com/filecoin-project/lotus/chain/actors/adt"
 	"github.com/filecoin-project/lotus/chain/actors/builtin"
 	"github.com/filecoin-project/lotus/chain/types"
@@ -47,11 +52,15 @@ func init() {
 	builtin.RegisterActorState(builtin5.StorageMarketActorCodeID, func(store adt.Store, root cid.Cid) (cbor.Marshaler, error) {
 		return load5(store, root)
 	})
+
+	builtin.RegisterActorState(builtin6.StorageMarketActorCodeID, func(store adt.Store, root cid.Cid) (cbor.Marshaler, error) {
+		return load6(store, root)
+	})
 }
 
 var (
-	Address = builtin5.StorageMarketActorAddr
-	Methods = builtin5.MethodsMarket
+	Address = builtin6.StorageMarketActorAddr
+	Methods = builtin6.MethodsMarket
 )
 
 func Load(store adt.Store, act *types.Actor) (State, error) {
@@ -72,8 +81,62 @@ func Load(store adt.Store, act *types.Actor) (State, error) {
 	case builtin5.StorageMarketActorCodeID:
 		return load5(store, act.Head)
 
+	case builtin6.StorageMarketActorCodeID:
+		return load6(store, act.Head)
+
 	}
 	return nil, xerrors.Errorf("unknown actor code %s", act.Code)
+}
+
+func MakeState(store adt.Store, av actors.Version) (State, error) {
+	switch av {
+
+	case actors.Version0:
+		return make0(store)
+
+	case actors.Version2:
+		return make2(store)
+
+	case actors.Version3:
+		return make3(store)
+
+	case actors.Version4:
+		return make4(store)
+
+	case actors.Version5:
+		return make5(store)
+
+	case actors.Version6:
+		return make6(store)
+
+	}
+	return nil, xerrors.Errorf("unknown actor version %d", av)
+}
+
+func GetActorCodeID(av actors.Version) (cid.Cid, error) {
+	switch av {
+
+	case actors.Version0:
+		return builtin0.StorageMarketActorCodeID, nil
+
+	case actors.Version2:
+		return builtin2.StorageMarketActorCodeID, nil
+
+	case actors.Version3:
+		return builtin3.StorageMarketActorCodeID, nil
+
+	case actors.Version4:
+		return builtin4.StorageMarketActorCodeID, nil
+
+	case actors.Version5:
+		return builtin5.StorageMarketActorCodeID, nil
+
+	case actors.Version6:
+		return builtin6.StorageMarketActorCodeID, nil
+
+	}
+
+	return cid.Undef, xerrors.Errorf("unknown actor version %d", av)
 }
 
 type State interface {
@@ -90,6 +153,7 @@ type State interface {
 		minerAddr address.Address, deals []abi.DealID, currEpoch, sectorExpiry abi.ChainEpoch,
 	) (weight, verifiedWeight abi.DealWeight, err error)
 	NextID() (abi.DealID, error)
+	GetState() interface{}
 }
 
 type BalanceTable interface {
@@ -114,7 +178,43 @@ type DealProposals interface {
 }
 
 type PublishStorageDealsParams = market0.PublishStorageDealsParams
-type PublishStorageDealsReturn = market0.PublishStorageDealsReturn
+
+type PublishStorageDealsReturn interface {
+	DealIDs() ([]abi.DealID, error)
+	// Note that this index is based on the batch of deals that were published, NOT the DealID
+	IsDealValid(index uint64) (bool, error)
+}
+
+func DecodePublishStorageDealsReturn(b []byte, nv network.Version) (PublishStorageDealsReturn, error) {
+	av, err := actors.VersionForNetwork(nv)
+	if err != nil {
+		return nil, err
+	}
+
+	switch av {
+
+	case actors.Version0:
+		return decodePublishStorageDealsReturn0(b)
+
+	case actors.Version2:
+		return decodePublishStorageDealsReturn2(b)
+
+	case actors.Version3:
+		return decodePublishStorageDealsReturn3(b)
+
+	case actors.Version4:
+		return decodePublishStorageDealsReturn4(b)
+
+	case actors.Version5:
+		return decodePublishStorageDealsReturn5(b)
+
+	case actors.Version6:
+		return decodePublishStorageDealsReturn6(b)
+
+	}
+	return nil, xerrors.Errorf("unknown actor version %d", av)
+}
+
 type VerifyDealsForActivationParams = market0.VerifyDealsForActivationParams
 type WithdrawBalanceParams = market0.WithdrawBalanceParams
 
@@ -174,4 +274,20 @@ func EmptyDealState() *DealState {
 		SlashEpoch:       -1,
 		LastUpdatedEpoch: -1,
 	}
+}
+
+// returns the earned fees and pending fees for a given deal
+func (deal DealProposal) GetDealFees(height abi.ChainEpoch) (abi.TokenAmount, abi.TokenAmount) {
+	tf := big.Mul(deal.StoragePricePerEpoch, big.NewInt(int64(deal.EndEpoch-deal.StartEpoch)))
+
+	ef := big.Mul(deal.StoragePricePerEpoch, big.NewInt(int64(height-deal.StartEpoch)))
+	if ef.LessThan(big.Zero()) {
+		ef = big.Zero()
+	}
+
+	if ef.GreaterThan(tf) {
+		ef = tf
+	}
+
+	return ef, big.Sub(tf, ef)
 }

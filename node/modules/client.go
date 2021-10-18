@@ -14,6 +14,11 @@ import (
 	dtimpl "github.com/filecoin-project/go-data-transfer/impl"
 	dtnet "github.com/filecoin-project/go-data-transfer/network"
 	dtgstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
+	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/ipfs/go-datastore"
+	"github.com/ipfs/go-datastore/namespace"
+	"github.com/libp2p/go-libp2p-core/host"
+
 	"github.com/filecoin-project/go-fil-markets/discovery"
 	discoveryimpl "github.com/filecoin-project/go-fil-markets/discovery/impl"
 	"github.com/filecoin-project/go-fil-markets/retrievalmarket"
@@ -23,13 +28,9 @@ import (
 	storageimpl "github.com/filecoin-project/go-fil-markets/storagemarket/impl"
 	"github.com/filecoin-project/go-fil-markets/storagemarket/impl/requestvalidation"
 	smnet "github.com/filecoin-project/go-fil-markets/storagemarket/network"
-	"github.com/filecoin-project/go-multistore"
-	"github.com/filecoin-project/go-state-types/abi"
-	"github.com/ipfs/go-datastore"
-	"github.com/ipfs/go-datastore/namespace"
-	"github.com/libp2p/go-libp2p-core/host"
-
 	"github.com/filecoin-project/lotus/blockstore"
+	"github.com/filecoin-project/lotus/markets/storageadapter"
+
 	"github.com/filecoin-project/lotus/chain/market"
 	"github.com/filecoin-project/lotus/journal"
 	"github.com/filecoin-project/lotus/markets"
@@ -38,10 +39,8 @@ import (
 	"github.com/filecoin-project/lotus/node/impl/full"
 	payapi "github.com/filecoin-project/lotus/node/impl/paych"
 	"github.com/filecoin-project/lotus/node/modules/dtypes"
-	"github.com/filecoin-project/lotus/node/modules/helpers"
 	"github.com/filecoin-project/lotus/node/repo"
-	"github.com/filecoin-project/lotus/node/repo/importmgr"
-	"github.com/filecoin-project/lotus/node/repo/retrievalstoremgr"
+	"github.com/filecoin-project/lotus/node/repo/imports"
 )
 
 func HandleMigrateClientFunds(lc fx.Lifecycle, ds dtypes.MetadataDS, wallet full.WalletAPI, fundMgr *market.FundManager) {
@@ -78,34 +77,21 @@ func HandleMigrateClientFunds(lc fx.Lifecycle, ds dtypes.MetadataDS, wallet full
 	})
 }
 
-func ClientMultiDatastore(lc fx.Lifecycle, mctx helpers.MetricsCtx, r repo.LockedRepo) (dtypes.ClientMultiDstore, error) {
-	ctx := helpers.LifecycleCtx(mctx, lc)
-	ds, err := r.Datastore(ctx, "/client")
-	if err != nil {
-		return nil, xerrors.Errorf("getting datastore out of repo: %w", err)
+func ClientImportMgr(ds dtypes.MetadataDS, r repo.LockedRepo) (dtypes.ClientImportMgr, error) {
+	// store the imports under the repo's `imports` subdirectory.
+	dir := filepath.Join(r.Path(), "imports")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, xerrors.Errorf("failed to create directory %s: %w", dir, err)
 	}
 
-	mds, err := multistore.NewMultiDstore(ds)
-	if err != nil {
-		return nil, err
-	}
-
-	lc.Append(fx.Hook{
-		OnStop: func(ctx context.Context) error {
-			return mds.Close()
-		},
-	})
-
-	return mds, nil
+	ns := namespace.Wrap(ds, datastore.NewKey("/client"))
+	return imports.NewManager(ns, dir), nil
 }
 
-func ClientImportMgr(mds dtypes.ClientMultiDstore, ds dtypes.MetadataDS) dtypes.ClientImportMgr {
-	return importmgr.New(mds, namespace.Wrap(ds, datastore.NewKey("/client")))
-}
-
-func ClientBlockstore(imgr dtypes.ClientImportMgr) dtypes.ClientBlockstore {
+// TODO this should be removed.
+func ClientBlockstore() dtypes.ClientBlockstore {
 	// in most cases this is now unused in normal operations -- however, it's important to preserve for the IPFS use case
-	return blockstore.WrapIDStore(imgr.Blockstore)
+	return blockstore.WrapIDStore(blockstore.FromDatastore(datastore.NewMapDatastore()))
 }
 
 // RegisterClientValidator is an initialization hook that registers the client
@@ -134,26 +120,21 @@ func NewClientGraphsyncDataTransfer(lc fx.Lifecycle, h host.Host, gs dtypes.Grap
 
 	// data-transfer push / pull channel restart configuration:
 	dtRestartConfig := dtimpl.ChannelRestartConfig(channelmonitor.Config{
-		// For now only monitor push channels (for storage deals)
-		MonitorPushChannels: true,
-		// TODO: Enable pull channel monitoring (for retrievals) when the
-		//  following issue has been fixed:
-		// https://github.com/filecoin-project/go-data-transfer/issues/172
-		MonitorPullChannels: false,
-		// Wait up to 30s for the other side to respond to an Open channel message
-		AcceptTimeout: 30 * time.Second,
-		// Send a restart message if the data rate falls below 1024 bytes / minute
-		Interval:            time.Minute,
-		MinBytesTransferred: 1024,
-		// Perform check 10 times / minute
-		ChecksPerInterval: 10,
+		// Disable Accept and Complete timeouts until this issue is resolved:
+		// https://github.com/filecoin-project/lotus/issues/6343#
+		// Wait for the other side to respond to an Open channel message
+		AcceptTimeout: 0,
+		// Wait for the other side to send a Complete message once all
+		// data has been sent / received
+		CompleteTimeout: 0,
+
+		// When an error occurs, wait a little while until all related errors
+		// have fired before sending a restart message
+		RestartDebounce: 10 * time.Second,
 		// After sending a restart, wait for at least 1 minute before sending another
 		RestartBackoff: time.Minute,
 		// After trying to restart 3 times, give up and fail the transfer
 		MaxConsecutiveRestarts: 3,
-		// Wait up to 30s for the other side to send a Complete message once all
-		// data has been sent / received
-		CompleteTimeout: 30 * time.Second,
 	})
 	dt, err := dtimpl.NewDataTransfer(dtDs, filepath.Join(r.Path(), "data-transfer"), net, transport, dtRestartConfig)
 	if err != nil {
@@ -178,13 +159,30 @@ func NewClientDatastore(ds dtypes.MetadataDS) dtypes.ClientDatastore {
 	return namespace.Wrap(ds, datastore.NewKey("/deals/client"))
 }
 
-func StorageClient(lc fx.Lifecycle, h host.Host, ibs dtypes.ClientBlockstore, mds dtypes.ClientMultiDstore, r repo.LockedRepo, dataTransfer dtypes.ClientDataTransfer, discovery *discoveryimpl.Local, deals dtypes.ClientDatastore, scn storagemarket.StorageClientNode, j journal.Journal) (storagemarket.StorageClient, error) {
+// StorageBlockstoreAccessor returns the default storage blockstore accessor
+// from the import manager.
+func StorageBlockstoreAccessor(importmgr dtypes.ClientImportMgr) storagemarket.BlockstoreAccessor {
+	return storageadapter.NewImportsBlockstoreAccessor(importmgr)
+}
+
+// RetrievalBlockstoreAccessor returns the default retrieval blockstore accessor
+// using the subdirectory `retrievals` under the repo.
+func RetrievalBlockstoreAccessor(r repo.LockedRepo) (retrievalmarket.BlockstoreAccessor, error) {
+	dir := filepath.Join(r.Path(), "retrievals")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, xerrors.Errorf("failed to create directory %s: %w", dir, err)
+	}
+	return retrievaladapter.NewCARBlockstoreAccessor(dir), nil
+}
+
+func StorageClient(lc fx.Lifecycle, h host.Host, dataTransfer dtypes.ClientDataTransfer, discovery *discoveryimpl.Local,
+	deals dtypes.ClientDatastore, scn storagemarket.StorageClientNode, accessor storagemarket.BlockstoreAccessor, j journal.Journal) (storagemarket.StorageClient, error) {
 	// go-fil-markets protocol retries:
 	// 1s, 5s, 25s, 2m5s, 5m x 11 ~= 1 hour
 	marketsRetryParams := smnet.RetryParameters(time.Second, 5*time.Minute, 15, 5)
 	net := smnet.NewFromLibp2pHost(h, marketsRetryParams)
 
-	c, err := storageimpl.NewClient(net, ibs, mds, dataTransfer, discovery, deals, scn, storageimpl.DealPollingInterval(time.Second))
+	c, err := storageimpl.NewClient(net, dataTransfer, discovery, deals, scn, accessor, storageimpl.DealPollingInterval(time.Second))
 	if err != nil {
 		return nil, err
 	}
@@ -206,10 +204,13 @@ func StorageClient(lc fx.Lifecycle, h host.Host, ibs dtypes.ClientBlockstore, md
 }
 
 // RetrievalClient creates a new retrieval client attached to the client blockstore
-func RetrievalClient(lc fx.Lifecycle, h host.Host, mds dtypes.ClientMultiDstore, dt dtypes.ClientDataTransfer, payAPI payapi.PaychAPI, resolver discovery.PeerResolver, ds dtypes.MetadataDS, chainAPI full.ChainAPI, stateAPI full.StateAPI, j journal.Journal) (retrievalmarket.RetrievalClient, error) {
+func RetrievalClient(lc fx.Lifecycle, h host.Host, r repo.LockedRepo, dt dtypes.ClientDataTransfer, payAPI payapi.PaychAPI, resolver discovery.PeerResolver,
+	ds dtypes.MetadataDS, chainAPI full.ChainAPI, stateAPI full.StateAPI, accessor retrievalmarket.BlockstoreAccessor, j journal.Journal) (retrievalmarket.RetrievalClient, error) {
+
 	adapter := retrievaladapter.NewRetrievalClientNode(payAPI, chainAPI, stateAPI)
 	network := rmnet.NewFromLibp2pHost(h)
-	client, err := retrievalimpl.NewClient(network, mds, dt, adapter, resolver, namespace.Wrap(ds, datastore.NewKey("/retrievals/client")))
+	ds = namespace.Wrap(ds, datastore.NewKey("/retrievals/client"))
+	client, err := retrievalimpl.NewClient(network, dt, adapter, resolver, ds, accessor)
 	if err != nil {
 		return nil, err
 	}
@@ -225,14 +226,4 @@ func RetrievalClient(lc fx.Lifecycle, h host.Host, mds dtypes.ClientMultiDstore,
 		},
 	})
 	return client, nil
-}
-
-// ClientRetrievalStoreManager is the default version of the RetrievalStoreManager that runs on multistore
-func ClientRetrievalStoreManager(imgr dtypes.ClientImportMgr) dtypes.ClientRetrievalStoreManager {
-	return retrievalstoremgr.NewMultiStoreRetrievalStoreManager(imgr)
-}
-
-// ClientBlockstoreRetrievalStoreManager is the default version of the RetrievalStoreManager that runs on multistore
-func ClientBlockstoreRetrievalStoreManager(bs dtypes.ClientBlockstore) dtypes.ClientRetrievalStoreManager {
-	return retrievalstoremgr.NewBlockstoreRetrievalStoreManager(bs)
 }

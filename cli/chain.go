@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,11 +30,12 @@ import (
 	cbg "github.com/whyrusleeping/cbor-gen"
 	"golang.org/x/xerrors"
 
+	"github.com/filecoin-project/lotus/api"
 	lapi "github.com/filecoin-project/lotus/api"
 	"github.com/filecoin-project/lotus/api/v0api"
 	"github.com/filecoin-project/lotus/build"
 	"github.com/filecoin-project/lotus/chain/actors"
-	"github.com/filecoin-project/lotus/chain/stmgr"
+	"github.com/filecoin-project/lotus/chain/consensus/filcns"
 	types "github.com/filecoin-project/lotus/chain/types"
 )
 
@@ -476,7 +476,7 @@ var ChainInspectUsage = &cli.Command{
 				return err
 			}
 
-			mm := stmgr.MethodsMap[code][m.Message.Method]
+			mm := filcns.NewActorRegistry().Methods[code][m.Message.Method] // TODO: use remote map
 
 			byMethod[mm.Name] += m.Message.GasLimit
 			byMethodC[mm.Name]++
@@ -535,7 +535,7 @@ var ChainListCmd = &cli.Command{
 	Aliases: []string{"love"},
 	Usage:   "View a segment of the chain",
 	Flags: []cli.Flag{
-		&cli.Uint64Flag{Name: "height"},
+		&cli.Uint64Flag{Name: "height", DefaultText: "current head"},
 		&cli.IntFlag{Name: "count", Value: 30},
 		&cli.StringFlag{
 			Name:  "format",
@@ -723,12 +723,6 @@ var ChainGetCmd = &cli.Command{
 				return err
 			}
 
-			if ts == nil {
-				ts, err = api.ChainHead(ctx)
-				if err != nil {
-					return err
-				}
-			}
 			p = "/ipfs/" + ts.ParentState().String() + p
 			if cctx.Bool("verbose") {
 				fmt.Println(p)
@@ -1035,7 +1029,9 @@ var ChainExportCmd = &cli.Command{
 	ArgsUsage: "[outputPath]",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
-			Name: "tipset",
+			Name:  "tipset",
+			Usage: "specify tipset to start the export from",
+			Value: "@head",
 		},
 		&cli.Int64Flag{
 			Name:  "recent-stateroots",
@@ -1122,11 +1118,13 @@ var SlashConsensusFault = &cli.Command{
 		},
 	},
 	Action: func(cctx *cli.Context) error {
-		api, closer, err := GetFullNodeAPI(cctx)
+		srv, err := GetFullNodeServices(cctx)
 		if err != nil {
 			return err
 		}
-		defer closer()
+		defer srv.Close() //nolint:errcheck
+
+		a := srv.FullNodeAPI()
 		ctx := ReqContext(cctx)
 
 		c1, err := cid.Parse(cctx.Args().Get(0))
@@ -1134,7 +1132,7 @@ var SlashConsensusFault = &cli.Command{
 			return xerrors.Errorf("parsing cid 1: %w", err)
 		}
 
-		b1, err := api.ChainGetBlock(ctx, c1)
+		b1, err := a.ChainGetBlock(ctx, c1)
 		if err != nil {
 			return xerrors.Errorf("getting block 1: %w", err)
 		}
@@ -1144,7 +1142,7 @@ var SlashConsensusFault = &cli.Command{
 			return xerrors.Errorf("parsing cid 2: %w", err)
 		}
 
-		b2, err := api.ChainGetBlock(ctx, c2)
+		b2, err := a.ChainGetBlock(ctx, c2)
 		if err != nil {
 			return xerrors.Errorf("getting block 2: %w", err)
 		}
@@ -1155,7 +1153,7 @@ var SlashConsensusFault = &cli.Command{
 
 		var fromAddr address.Address
 		if from := cctx.String("from"); from == "" {
-			defaddr, err := api.WalletDefaultAddress(ctx)
+			defaddr, err := a.WalletDefaultAddress(ctx)
 			if err != nil {
 				return err
 			}
@@ -1191,7 +1189,7 @@ var SlashConsensusFault = &cli.Command{
 				return xerrors.Errorf("parsing cid extra: %w", err)
 			}
 
-			bExtra, err := api.ChainGetBlock(ctx, cExtra)
+			bExtra, err := a.ChainGetBlock(ctx, cExtra)
 			if err != nil {
 				return xerrors.Errorf("getting block extra: %w", err)
 			}
@@ -1209,15 +1207,17 @@ var SlashConsensusFault = &cli.Command{
 			return err
 		}
 
-		msg := &types.Message{
-			To:     b2.Miner,
-			From:   fromAddr,
-			Value:  types.NewInt(0),
-			Method: builtin.MethodsMiner.ReportConsensusFault,
-			Params: enc,
+		proto := &api.MessagePrototype{
+			Message: types.Message{
+				To:     b2.Miner,
+				From:   fromAddr,
+				Value:  types.NewInt(0),
+				Method: builtin.MethodsMiner.ReportConsensusFault,
+				Params: enc,
+			},
 		}
 
-		smsg, err := api.MpoolPushMessage(ctx, msg, nil)
+		smsg, err := InteractiveSend(ctx, cctx, srv, proto)
 		if err != nil {
 			return err
 		}
@@ -1346,7 +1346,7 @@ var ChainEncodeCmd = &cli.Command{
 var chainEncodeParamsCmd = &cli.Command{
 	Name:      "params",
 	Usage:     "Encodes the given JSON params",
-	ArgsUsage: "[toAddr method params]",
+	ArgsUsage: "[dest method params]",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name: "tipset",
@@ -1356,22 +1356,14 @@ var chainEncodeParamsCmd = &cli.Command{
 			Value: "base64",
 			Usage: "specify input encoding to parse",
 		},
+		&cli.BoolFlag{
+			Name:  "to-code",
+			Usage: "interpret dest as code CID instead of as address",
+		},
 	},
 	Action: func(cctx *cli.Context) error {
-		api, closer, err := GetFullNodeAPI(cctx)
-		if err != nil {
-			return err
-		}
-		defer closer()
-		ctx := ReqContext(cctx)
-
 		if cctx.Args().Len() != 3 {
 			return ShowHelp(cctx, fmt.Errorf("incorrect number of arguments"))
-		}
-
-		to, err := address.NewFromString(cctx.Args().First())
-		if err != nil {
-			return xerrors.Errorf("parsing toAddr: %w", err)
 		}
 
 		method, err := strconv.ParseInt(cctx.Args().Get(1), 10, 64)
@@ -1379,39 +1371,50 @@ var chainEncodeParamsCmd = &cli.Command{
 			return xerrors.Errorf("parsing method id: %w", err)
 		}
 
-		ts, err := LoadTipSet(ctx, cctx, api)
-		if err != nil {
-			return err
-		}
+		ctx := ReqContext(cctx)
 
-		act, err := api.StateGetActor(ctx, to, ts.Key())
-		if err != nil {
-			return xerrors.Errorf("getting actor: %w", err)
-		}
+		var p []byte
+		if !cctx.Bool("to-code") {
+			svc, err := GetFullNodeServices(cctx)
+			if err != nil {
+				return err
+			}
+			defer svc.Close() // nolint
 
-		methodMeta, found := stmgr.MethodsMap[act.Code][abi.MethodNum(method)]
-		if !found {
-			return fmt.Errorf("method %d not found on actor %s", method, act.Code)
-		}
+			to, err := address.NewFromString(cctx.Args().First())
+			if err != nil {
+				return xerrors.Errorf("parsing to addr: %w", err)
+			}
 
-		p := reflect.New(methodMeta.Params.Elem()).Interface().(cbg.CBORMarshaler)
+			p, err = svc.DecodeTypedParamsFromJSON(ctx, to, abi.MethodNum(method), cctx.Args().Get(2))
+			if err != nil {
+				return xerrors.Errorf("decoding json params: %w", err)
+			}
+		} else {
+			api, done, err := GetFullNodeAPIV1(cctx)
+			if err != nil {
+				return err
+			}
+			defer done()
 
-		if err := json.Unmarshal([]byte(cctx.Args().Get(2)), p); err != nil {
-			return fmt.Errorf("unmarshaling input into params type: %w", err)
-		}
+			to, err := cid.Parse(cctx.Args().First())
+			if err != nil {
+				return xerrors.Errorf("parsing to addr: %w", err)
+			}
 
-		buf := new(bytes.Buffer)
-		if err := p.MarshalCBOR(buf); err != nil {
-			return err
+			p, err = api.StateEncodeParams(ctx, to, abi.MethodNum(method), json.RawMessage(cctx.Args().Get(2)))
+			if err != nil {
+				return xerrors.Errorf("decoding json params: %w", err)
+			}
 		}
 
 		switch cctx.String("encoding") {
-		case "base64":
-			fmt.Println(base64.StdEncoding.EncodeToString(buf.Bytes()))
+		case "base64", "b64":
+			fmt.Println(base64.StdEncoding.EncodeToString(p))
 		case "hex":
-			fmt.Println(hex.EncodeToString(buf.Bytes()))
+			fmt.Println(hex.EncodeToString(p))
 		default:
-			return xerrors.Errorf("unrecognized encoding: %s", cctx.String("encoding"))
+			return xerrors.Errorf("unknown encoding")
 		}
 
 		return nil

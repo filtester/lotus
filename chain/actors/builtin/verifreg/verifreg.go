@@ -19,6 +19,9 @@ import (
 
 	builtin5 "github.com/filecoin-project/specs-actors/v5/actors/builtin"
 
+	builtin6 "github.com/filecoin-project/specs-actors/v6/actors/builtin"
+
+	"github.com/filecoin-project/lotus/chain/actors"
 	"github.com/filecoin-project/lotus/chain/actors/adt"
 	"github.com/filecoin-project/lotus/chain/actors/builtin"
 	"github.com/filecoin-project/lotus/chain/types"
@@ -46,11 +49,15 @@ func init() {
 		return load5(store, root)
 	})
 
+	builtin.RegisterActorState(builtin6.VerifiedRegistryActorCodeID, func(store adt.Store, root cid.Cid) (cbor.Marshaler, error) {
+		return load6(store, root)
+	})
+
 }
 
 var (
-	Address = builtin5.VerifiedRegistryActorAddr
-	Methods = builtin5.MethodsVerifiedRegistry
+	Address = builtin6.VerifiedRegistryActorAddr
+	Methods = builtin6.MethodsVerifiedRegistry
 )
 
 func Load(store adt.Store, act *types.Actor) (State, error) {
@@ -71,8 +78,62 @@ func Load(store adt.Store, act *types.Actor) (State, error) {
 	case builtin5.VerifiedRegistryActorCodeID:
 		return load5(store, act.Head)
 
+	case builtin6.VerifiedRegistryActorCodeID:
+		return load6(store, act.Head)
+
 	}
 	return nil, xerrors.Errorf("unknown actor code %s", act.Code)
+}
+
+func MakeState(store adt.Store, av actors.Version, rootKeyAddress address.Address) (State, error) {
+	switch av {
+
+	case actors.Version0:
+		return make0(store, rootKeyAddress)
+
+	case actors.Version2:
+		return make2(store, rootKeyAddress)
+
+	case actors.Version3:
+		return make3(store, rootKeyAddress)
+
+	case actors.Version4:
+		return make4(store, rootKeyAddress)
+
+	case actors.Version5:
+		return make5(store, rootKeyAddress)
+
+	case actors.Version6:
+		return make6(store, rootKeyAddress)
+
+	}
+	return nil, xerrors.Errorf("unknown actor version %d", av)
+}
+
+func GetActorCodeID(av actors.Version) (cid.Cid, error) {
+	switch av {
+
+	case actors.Version0:
+		return builtin0.VerifiedRegistryActorCodeID, nil
+
+	case actors.Version2:
+		return builtin2.VerifiedRegistryActorCodeID, nil
+
+	case actors.Version3:
+		return builtin3.VerifiedRegistryActorCodeID, nil
+
+	case actors.Version4:
+		return builtin4.VerifiedRegistryActorCodeID, nil
+
+	case actors.Version5:
+		return builtin5.VerifiedRegistryActorCodeID, nil
+
+	case actors.Version6:
+		return builtin6.VerifiedRegistryActorCodeID, nil
+
+	}
+
+	return cid.Undef, xerrors.Errorf("unknown actor version %d", av)
 }
 
 type State interface {
@@ -83,4 +144,5 @@ type State interface {
 	VerifierDataCap(address.Address) (bool, abi.StoragePower, error)
 	ForEachVerifier(func(addr address.Address, dcap abi.StoragePower) error) error
 	ForEachClient(func(addr address.Address, dcap abi.StoragePower) error) error
+	GetState() interface{}
 }
