@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/filecoin-project/lotus/extern/sector-storage/fsutil"
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-multierror"
 	"github.com/ipfs/go-cid"
@@ -20,6 +19,7 @@ import (
 	"github.com/filecoin-project/specs-storage/storage"
 
 	"github.com/filecoin-project/lotus/extern/sector-storage/ffiwrapper"
+	"github.com/filecoin-project/lotus/extern/sector-storage/fsutil"
 	"github.com/filecoin-project/lotus/extern/sector-storage/sealtasks"
 	"github.com/filecoin-project/lotus/extern/sector-storage/stores"
 	"github.com/filecoin-project/lotus/extern/sector-storage/storiface"
@@ -227,7 +227,6 @@ func (m *Manager) schedFetch(sector storage.SectorRef, ft storiface.SectorFileTy
 // one of it's sealing scratch spaces to store them after fetching them from another worker.
 // If the chosen worker already has the Unsealed sector file, we will NOT Unseal the sealed sector file again.
 func (m *Manager) SectorsUnsealPiece(ctx context.Context, sector storage.SectorRef, offset storiface.UnpaddedByteIndex, size abi.UnpaddedPieceSize, ticket abi.SealRandomness, unsealed *cid.Cid) error {
-
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -258,7 +257,7 @@ func (m *Manager) SectorsUnsealPiece(ctx context.Context, sector storage.SectorR
 
 	// selector will schedule the Unseal task on a worker that either already has the sealed sector files or has space in
 	// one of it's sealing scratch spaces to store them after fetching them from another worker.
-	selector := newExistingSelector(m.index, sector.ID, storiface.FTSealed|storiface.FTCache, true)
+	selector := newExistingSelector(m.index, sector.ID, storiface.FTSealed|storiface.FTCache, true,"")
 
 	log.Debugf("will schedule unseal for sector %d", sector.ID)
 	err = m.sched.Schedule(ctx, sector, sealtasks.TTUnseal, selector, sealFetch, func(ctx context.Context, w Worker) error {
@@ -275,24 +274,12 @@ func (m *Manager) SectorsUnsealPiece(ctx context.Context, sector storage.SectorR
 		return err
 	})
 	if err != nil {
-		return err
-	}
-
-	selector = newExistingSelector(m.index, sector.ID, storiface.FTUnsealed, false, "")
-
-	log.Debugf("schedule read piece for sector %d, offset %d, size %d", sector.ID, offset, size)
-	err = m.sched.Schedule(ctx, sector, sealtasks.TTReadUnsealed, selector, m.schedFetch(sector, storiface.FTUnsealed, storiface.PathSealing, storiface.AcquireMove),
-		m.readPiece(sink, sector, offset, size, &readOk))
-	if err != nil {
-		return xerrors.Errorf("reading piece from sealed sector: %w", err)
-	}
-
-	if !readOk {
 		return xerrors.Errorf("worker UnsealPiece call: %s", err)
 	}
 
 	return nil
 }
+
 
 func (m *Manager) NewSector(ctx context.Context, sector storage.SectorRef) error {
 	log.Warnf("stub NewSector")
