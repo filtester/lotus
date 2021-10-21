@@ -77,7 +77,8 @@ var (
 )
 
 func minerAddrFromDS(ds dtypes.MetadataDS) (address.Address, error) {
-	maddrb, err := ds.Get(datastore.NewKey("miner-address"))
+	key :="miner-address"
+	maddrb, err := ds.Get(datastore.NewKey(key))
 	if err != nil {
 		return address.Undef, err
 	}
