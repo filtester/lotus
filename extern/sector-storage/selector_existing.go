@@ -45,7 +45,7 @@ func (s *existingSelector) Ok(ctx context.Context, task sealtasks.TaskType, spt 
 	if len(s.hostname) > 0 {
 		if s.hostname != whnd.info.Hostname {
 			log.Infof("existingSelector, hostname not match: %s != %s", s.hostname, whnd.info.Hostname)
-			return false, xerrors.Errorf("hostname not match: %s != %s", s.hostname, whnd.info.Hostname)
+			return false, nil
 		}
 		log.Infof("existingSelector, hostname is matched: %s = %s", s.hostname, whnd.info.Hostname)
 	}
