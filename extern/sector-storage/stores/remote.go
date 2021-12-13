@@ -29,7 +29,7 @@ import (
 
 var FetchTempSubdir = "fetching"
 
-var CopyBuf = 1 << 20
+var CopyBuf = 64 << 20
 
 type Remote struct {
 	local Store
