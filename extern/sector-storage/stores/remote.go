@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/filecoin-project/lotus/extern/sector-storage/fsutil"
 	"github.com/filecoin-project/lotus/extern/sector-storage/storiface"
@@ -156,7 +157,7 @@ func (r *Remote) AcquireSector(ctx context.Context, s storage.SectorRef, existin
 		dest := storiface.PathByType(apaths, fileType)
 		storageID := storiface.PathByType(ids, fileType)
 
-		url, err := r.acquireFromRemote(ctx, s.ID, fileType, dest)
+		url, err := r.acquireFromRemote(ctx, s.ID, fileType, dest, pathType == storiface.PathStorage)
 		if err != nil {
 			return storiface.SectorPaths{}, storiface.SectorPaths{}, err
 		}
@@ -191,7 +192,7 @@ func tempFetchDest(spath string, create bool) (string, error) {
 	return filepath.Join(tempdir, b), nil
 }
 
-func (r *Remote) acquireFromRemote(ctx context.Context, s abi.SectorID, fileType storiface.SectorFileType, dest string) (string, error) {
+func (r *Remote) acquireFromRemote(ctx context.Context, s abi.SectorID, fileType storiface.SectorFileType, dest string, isStore bool) (string, error) {
 	si, err := r.index.StorageFindSector(ctx, s, fileType, 0, false)
 	if err != nil {
 		return "", err
@@ -224,6 +225,26 @@ func (r *Remote) acquireFromRemote(ctx context.Context, s abi.SectorID, fileType
 			if err == nil {
 				log.Infof("MvFromLocal success: %s -> %s", url, tempDest)
 				localExisted = true
+			}
+
+			if !localExisted && isStore {
+				err = r.moveFromRemote(ctx, url, tempDest)
+				if err != nil {
+					log.Infof("moveFromRemote error %s -> %s", url, tempDest)
+				} else {
+					for i := 0; i < 120; i++ {
+						_, err = os.Stat(tempDest)
+						if err == nil {
+							localExisted = true
+							log.Infof("moveFromRemote success %s -> %s", url, tempDest)
+							break
+						} else {
+							log.Infof("moveFromRemote failed(%v), %s -> %s,err:%v", i, url, tempDest, err)
+							time.Sleep(time.Duration(30) * time.Second)
+						}
+					}
+
+				}
 			}
 
 			if !localExisted {
@@ -307,6 +328,32 @@ func (r *Remote) fetch(ctx context.Context, url, outname string) error {
 	default:
 		return xerrors.Errorf("unknown content type: '%s'", mediatype)
 	}
+}
+
+func (r *Remote) moveFromRemote(ctx context.Context, url string, dest string) error {
+	log.Infof("Move to miner storage  %s", url)
+
+	req, err := http.NewRequest("MOVE", url, nil)
+	if err != nil {
+		return xerrors.Errorf("request: %w", err)
+	}
+	req.Header = r.auth
+	req = req.WithContext(ctx)
+	q := req.URL.Query()
+	q.Add("dest_path", dest)
+	req.URL.RawQuery = q.Encode()
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return xerrors.Errorf("do request: %w", err)
+	}
+	defer resp.Body.Close() // nolint
+
+	if resp.StatusCode != 200 {
+		return xerrors.Errorf("non-200 code: %d", resp.StatusCode)
+	}
+
+	return nil
 }
 
 func (r *Remote) checkAllocated(ctx context.Context, url string, spt abi.RegisteredSealProof, offset, size abi.PaddedPieceSize) (bool, error) {

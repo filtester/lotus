@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
 	logging "github.com/ipfs/go-log/v2"
@@ -56,6 +57,7 @@ func (handler *FetchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	mux.HandleFunc("/remote/{type}/{id}/{spt}/allocated/{offset}/{size}", handler.remoteGetAllocated).Methods("GET")
 	mux.HandleFunc("/remote/{type}/{id}", handler.remoteGetSector).Methods("GET")
 	mux.HandleFunc("/remote/{type}/{id}", handler.remoteDeleteSector).Methods("DELETE")
+	mux.HandleFunc("/remote/{type}/{id}", handler.remoteMoveSector).Methods("MOVE")
 
 	mux.ServeHTTP(w, r)
 }
@@ -304,4 +306,80 @@ func ftFromString(t string) (storiface.SectorFileType, error) {
 	default:
 		return 0, xerrors.Errorf("unknown sector file type: '%s'", t)
 	}
+}
+
+func (handler *FetchHandler) remoteMoveSector(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	log.Infof("SERVE MOVE SECTOR %s", r.URL)
+
+	id, err := storiface.ParseSectorID(vars["id"])
+	if err != nil {
+		log.Errorf("%+v", err)
+		w.WriteHeader(500)
+		return
+	}
+
+	ft, err := ftFromString(vars["type"])
+	if err != nil {
+		log.Errorf("%+v", err)
+		w.WriteHeader(500)
+		return
+	}
+	q := r.URL.Query()
+
+	destPath := q.Get("dest_path")
+	if len(destPath) == 0 {
+		log.Errorf("dest_path is nil")
+		w.WriteHeader(500)
+		return
+	}
+
+	// The caller has a lock on this sector already, no need to get one here
+
+	// passing 0 spt because we don't allocate anything
+	si := storage.SectorRef{
+		ID:        id,
+		ProofType: 0,
+	}
+
+	paths, _, err := handler.Local.AcquireSector(r.Context(), si, ft, storiface.FTNone, storiface.PathStorage, storiface.AcquireMove)
+	if err != nil {
+		log.Errorf("%+v", err)
+		w.WriteHeader(500)
+		return
+	}
+
+	// TODO: reserve local storage here
+
+	path := storiface.PathByType(paths, ft)
+	if path == "" {
+		log.Error("acquired path was empty")
+		w.WriteHeader(500)
+		return
+	}
+
+	_, err = os.Stat(path)
+	if err != nil {
+		log.Errorf("%+v", err)
+		w.WriteHeader(500)
+		return
+	}
+
+	storagePath := destPath[:strings.Index(destPath, vars["type"])]
+
+	_, err = os.Stat(storagePath)
+	if err != nil {
+		log.Errorf("%+v", err)
+		w.WriteHeader(500)
+		return
+	}
+	log.Infof("MOVE SECTOR files (%s) %s -> %s", id, path, destPath)
+
+	if err := move(path, destPath); err != nil {
+		w.WriteHeader(500)
+		log.Errorf("%+v", xerrors.Errorf("move sector error (storage %s) %s -> %s: %w", id, path, destPath, err))
+		return
+	}
+
+	w.WriteHeader(200)
 }
