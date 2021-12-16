@@ -30,7 +30,7 @@ import (
 
 var FetchTempSubdir = "fetching"
 
-var CopyBuf = 64 << 20
+var CopyBuf = 1 << 20
 
 type Remote struct {
 	local Store
@@ -227,7 +227,7 @@ func (r *Remote) acquireFromRemote(ctx context.Context, s abi.SectorID, fileType
 				localExisted = true
 			}
 
-			if !localExisted && isStore {
+			if false && !localExisted && isStore {
 				err = r.moveFromRemote(ctx, url, tempDest)
 				if err != nil {
 					log.Infof("moveFromRemote error %s -> %s", url, tempDest)
