@@ -3,6 +3,7 @@ package sectorstorage
 import (
 	"context"
 	"encoding/json"
+	proof5 "github.com/filecoin-project/specs-actors/v5/actors/runtime/proof"
 	"io"
 	"os"
 	"reflect"
@@ -574,3 +575,12 @@ func (w *wctx) Value(key interface{}) interface{} {
 var _ context.Context = &wctx{}
 
 var _ Worker = &LocalWorker{}
+
+
+func (l *LocalWorker) WinningPoSt(ctx context.Context, minerID abi.ActorID, privateSectorInfo ffi.SortedPrivateSectorInfo,  randomness abi.PoStRandomness) ([]proof5.PoStProof, error) {
+	log.Infof("wdPost enter, privateSectorInfo")
+	start := time.Now()
+	proofs,err :=ffi.GenerateWinningPoSt(minerID, privateSectorInfo, randomness)
+	defer  log.Infof("WinningPoSt finished proof = %v; takes %f seconds", proofs, time.Since(start).Seconds())
+	return proofs, err
+}

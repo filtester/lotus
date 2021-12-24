@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	ffi "github.com/filecoin-project/filecoin-ffi"
+	proof5 "github.com/filecoin-project/specs-actors/v5/actors/runtime/proof"
 
 	"github.com/google/uuid"
 	"github.com/ipfs/go-cid"
@@ -43,6 +45,8 @@ type Worker interface {
 	MoveStorage(ctx context.Context, sector storage.SectorRef, types storiface.SectorFileType) (storiface.CallID, error)                                                                                 //perm:admin
 	UnsealPiece(context.Context, storage.SectorRef, storiface.UnpaddedByteIndex, abi.UnpaddedPieceSize, abi.SealRandomness, cid.Cid) (storiface.CallID, error)                                           //perm:admin
 	Fetch(context.Context, storage.SectorRef, storiface.SectorFileType, storiface.PathType, storiface.AcquireMode) (storiface.CallID, error)                                                             //perm:admin
+
+	WinningPoSt(ctx context.Context, minerID abi.ActorID, privateSectorInfo ffi.SortedPrivateSectorInfo, randomness abi.PoStRandomness) ([]proof5.PoStProof, error)
 
 	TaskDisable(ctx context.Context, tt sealtasks.TaskType) error //perm:admin
 	TaskEnable(ctx context.Context, tt sealtasks.TaskType) error  //perm:admin
