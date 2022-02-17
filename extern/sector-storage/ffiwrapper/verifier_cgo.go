@@ -5,19 +5,17 @@ package ffiwrapper
 
 import (
 	"context"
-	"github.com/filecoin-project/go-jsonrpc"
-	"github.com/filecoin-project/lotus/api"
-	"go.opencensus.io/trace"
-	"golang.org/x/xerrors"
-	"net/http"
-
 	ffi "github.com/filecoin-project/filecoin-ffi"
+	"github.com/filecoin-project/go-jsonrpc"
 	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/lotus/api"
+	"github.com/filecoin-project/lotus/extern/sector-storage/storiface"
 	ffiproof "github.com/filecoin-project/specs-actors/v5/actors/runtime/proof"
 	"github.com/filecoin-project/specs-actors/v7/actors/runtime/proof"
 	"github.com/filecoin-project/specs-storage/storage"
-
-	"github.com/filecoin-project/lotus/extern/sector-storage/storiface"
+	"go.opencensus.io/trace"
+	"golang.org/x/xerrors"
+	"net/http"
 )
 
 func (sb *Sealer) GenerateWinningPoSt(ctx context.Context, minerID abi.ActorID, sectorInfo []proof.ExtendedSectorInfo, randomness abi.PoStRandomness) ([]proof.PoStProof, error) {
@@ -43,7 +41,7 @@ func (sb *Sealer) GenerateWinningPoSt(ctx context.Context, minerID abi.ActorID, 
 	if pcloser != nil && err == nil {
 		log.Infof("call winning post worker:%s", workerAddr)
 		defer pcloser()
-		var rs []proof5.PoStProof
+		var rs []proof.PoStProof
 		rs, err = workerApi.WinningPoSt(ctx, minerID, privsectors, randomness)
 		if err == nil && rs != nil {
 			log.Infof("call winning post worker finished")
