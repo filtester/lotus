@@ -68,7 +68,7 @@ var ResourceTable = map[sealtasks.TaskType]map[abi.RegisteredSealProof]Resources
 			MaxMemory: 8 << 30,
 			MinMemory: 8 << 30,
 
-			MaxParallelism: 1,
+			MaxParallelism: -1,
 
 			BaseMinMemory: 1 << 30,
 		},
@@ -76,7 +76,7 @@ var ResourceTable = map[sealtasks.TaskType]map[abi.RegisteredSealProof]Resources
 			MaxMemory: 4 << 30,
 			MinMemory: 4 << 30,
 
-			MaxParallelism: 1,
+			MaxParallelism: -1,
 
 			BaseMinMemory: 1 << 30,
 		},
@@ -110,7 +110,7 @@ var ResourceTable = map[sealtasks.TaskType]map[abi.RegisteredSealProof]Resources
 			MaxMemory: 128 << 30,
 			MinMemory: 112 << 30,
 
-			MaxParallelism: 1,
+			MaxParallelism: -1,
 
 			BaseMinMemory: 10 << 20,
 		},
@@ -118,7 +118,7 @@ var ResourceTable = map[sealtasks.TaskType]map[abi.RegisteredSealProof]Resources
 			MaxMemory: 64 << 30,
 			MinMemory: 56 << 30,
 
-			MaxParallelism: 1,
+			MaxParallelism: -1,
 
 			BaseMinMemory: 10 << 20,
 		},

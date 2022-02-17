@@ -77,9 +77,14 @@ var (
 )
 
 func minerAddrFromDS(ds dtypes.MetadataDS) (address.Address, error) {
-	maddrb, err := ds.Get(context.TODO(), datastore.NewKey("miner-address"))
-	if err != nil {
-		return address.Undef, err
+	key := "miner-address"
+	maddrb, err := ds.Get(context.TODO(), datastore.NewKey(key))
+	if maddrb == nil || err != nil {
+		key = key + "-moved"
+		maddrb, err = ds.Get(context.TODO(), datastore.NewKey(key))
+		if err != nil {
+			return address.Undef, err
+		}
 	}
 
 	return address.NewFromBytes(maddrb)

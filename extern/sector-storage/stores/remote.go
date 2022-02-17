@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/filecoin-project/lotus/extern/sector-storage/fsutil"
 	"github.com/filecoin-project/lotus/extern/sector-storage/storiface"
@@ -38,8 +39,9 @@ type Remote struct {
 
 	limit chan struct{}
 
-	fetchLk  sync.Mutex
-	fetching map[abi.SectorID]chan struct{}
+	fetchLk                   sync.Mutex
+	fetching                  map[abi.SectorID]chan struct{}
+	allowMoveSectorFromWorker bool
 
 	pfHandler PartialFileHandler
 }
@@ -57,7 +59,6 @@ func NewRemote(local Store, index SectorIndex, auth http.Header, fetchLimit int,
 		local: local,
 		index: index,
 		auth:  auth,
-
 		limit: make(chan struct{}, fetchLimit),
 
 		fetching:  map[abi.SectorID]chan struct{}{},
@@ -96,6 +97,21 @@ func (r *Remote) AcquireSector(ctx context.Context, s storage.SectorRef, existin
 		delete(r.fetching, s.ID)
 		r.fetchLk.Unlock()
 	}()
+
+	if len(r.limit) >= cap(r.limit) {
+		log.Infof("Throttling fetch, %d already running", len(r.limit))
+	}
+
+	// TODO: Smarter throttling
+	//  * Priority (just going sequentially is still pretty good)
+	//  * Per interface
+	//  * Aware of remote load
+	select {
+	case r.limit <- struct{}{}:
+		defer func() { <-r.limit }()
+	case <-ctx.Done():
+		return storiface.SectorPaths{}, storiface.SectorPaths{}, xerrors.Errorf("context error while waiting for fetch limiter: %w", ctx.Err())
+	}
 
 	paths, stores, err := r.local.AcquireSector(ctx, s, existing, allocate, pathType, op)
 	if err != nil {
@@ -141,7 +157,7 @@ func (r *Remote) AcquireSector(ctx context.Context, s storage.SectorRef, existin
 		dest := storiface.PathByType(apaths, fileType)
 		storageID := storiface.PathByType(ids, fileType)
 
-		url, err := r.acquireFromRemote(ctx, s.ID, fileType, dest)
+		url, err := r.acquireFromRemote(ctx, s.ID, fileType, dest, pathType == storiface.PathStorage)
 		if err != nil {
 			return storiface.SectorPaths{}, storiface.SectorPaths{}, err
 		}
@@ -177,7 +193,7 @@ func tempFetchDest(spath string, create bool) (string, error) {
 	return filepath.Join(tempdir, b), nil
 }
 
-func (r *Remote) acquireFromRemote(ctx context.Context, s abi.SectorID, fileType storiface.SectorFileType, dest string) (string, error) {
+func (r *Remote) acquireFromRemote(ctx context.Context, s abi.SectorID, fileType storiface.SectorFileType, dest string, isStore bool) (string, error) {
 	si, err := r.index.StorageFindSector(ctx, s, fileType, 0, false)
 	if err != nil {
 		return "", err
@@ -205,10 +221,42 @@ func (r *Remote) acquireFromRemote(ctx context.Context, s abi.SectorID, fileType
 				return "", xerrors.Errorf("removing dest: %w", err)
 			}
 
-			err = r.fetch(ctx, url, tempDest)
-			if err != nil {
-				merr = multierror.Append(merr, xerrors.Errorf("fetch error %s (storage %s) -> %s: %w", url, info.ID, tempDest, err))
-				continue
+			localExisted := false
+			err = MvFromLocal(url, tempDest)
+			if err == nil {
+				log.Infof("MvFromLocal success: %s -> %s", url, tempDest)
+				localExisted = true
+			}
+
+			if false && !localExisted && isStore {
+				err = r.moveFromRemote(ctx, url, tempDest)
+				if err != nil {
+					log.Infof("moveFromRemote error %s -> %s", url, tempDest)
+				} else {
+					for i := 0; i < 120; i++ {
+						_, err = os.Stat(tempDest)
+						if err == nil {
+							localExisted = true
+							log.Infof("moveFromRemote success %s -> %s", url, tempDest)
+							break
+						} else {
+							log.Infof("moveFromRemote failed(%v), %s -> %s,err:%v", i, url, tempDest, err)
+							time.Sleep(time.Duration(30) * time.Second)
+						}
+					}
+
+				}
+			}
+
+			if !localExisted {
+				if err := os.RemoveAll(dest); err != nil {
+					return "", xerrors.Errorf("removing dest: %w", err)
+				}
+				err = r.fetch(ctx, url, tempDest)
+				if err != nil {
+					merr = multierror.Append(merr, xerrors.Errorf("fetch error %s (storage %s) -> %s: %w", url, info.ID, tempDest, err))
+					continue
+				}
 			}
 
 			if err := move(tempDest, dest); err != nil {
@@ -227,21 +275,6 @@ func (r *Remote) acquireFromRemote(ctx context.Context, s abi.SectorID, fileType
 
 func (r *Remote) fetch(ctx context.Context, url, outname string) error {
 	log.Infof("Fetch %s -> %s", url, outname)
-
-	if len(r.limit) >= cap(r.limit) {
-		log.Infof("Throttling fetch, %d already running", len(r.limit))
-	}
-
-	// TODO: Smarter throttling
-	//  * Priority (just going sequentially is still pretty good)
-	//  * Per interface
-	//  * Aware of remote load
-	select {
-	case r.limit <- struct{}{}:
-		defer func() { <-r.limit }()
-	case <-ctx.Done():
-		return xerrors.Errorf("context error while waiting for fetch limiter: %w", ctx.Err())
-	}
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -296,6 +329,32 @@ func (r *Remote) fetch(ctx context.Context, url, outname string) error {
 	default:
 		return xerrors.Errorf("unknown content type: '%s'", mediatype)
 	}
+}
+
+func (r *Remote) moveFromRemote(ctx context.Context, url string, dest string) error {
+	log.Infof("Move to miner storage  %s", url)
+
+	req, err := http.NewRequest("MOVE", url, nil)
+	if err != nil {
+		return xerrors.Errorf("request: %w", err)
+	}
+	req.Header = r.auth
+	req = req.WithContext(ctx)
+	q := req.URL.Query()
+	q.Add("dest_path", dest)
+	req.URL.RawQuery = q.Encode()
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return xerrors.Errorf("do request: %w", err)
+	}
+	defer resp.Body.Close() // nolint
+
+	if resp.StatusCode != 200 {
+		return xerrors.Errorf("non-200 code: %d", resp.StatusCode)
+	}
+
+	return nil
 }
 
 func (r *Remote) checkAllocated(ctx context.Context, url string, spt abi.RegisteredSealProof, offset, size abi.PaddedPieceSize) (bool, error) {
