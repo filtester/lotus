@@ -1,3 +1,4 @@
+//stm: #unit
 package sectorstorage
 
 import (
@@ -102,6 +103,26 @@ func (s *schedTestWorker) AddPiece(ctx context.Context, sector storage.SectorRef
 	panic("implement me")
 }
 
+func (s *schedTestWorker) ReplicaUpdate(ctx context.Context, sector storage.SectorRef, peices []abi.PieceInfo) (storiface.CallID, error) {
+	panic("implement me")
+}
+
+func (s *schedTestWorker) ProveReplicaUpdate1(ctx context.Context, sector storage.SectorRef, sectorKey, newSealed, newUnsealed cid.Cid) (storiface.CallID, error) {
+	panic("implement me")
+}
+
+func (s *schedTestWorker) ProveReplicaUpdate2(ctx context.Context, sector storage.SectorRef, sectorKey, newSealed, newUnsealed cid.Cid, vanillaProofs storage.ReplicaVanillaProofs) (storiface.CallID, error) {
+	panic("implement me")
+}
+
+func (s *schedTestWorker) GenerateSectorKeyFromData(ctx context.Context, sector storage.SectorRef, commD cid.Cid) (storiface.CallID, error) {
+	panic("implement me")
+}
+
+func (s *schedTestWorker) FinalizeReplicaUpdate(ctx context.Context, sector storage.SectorRef, keepUnsealed []storage.Range) (storiface.CallID, error) {
+	panic("implement me")
+}
+
 func (s *schedTestWorker) MoveStorage(ctx context.Context, sector storage.SectorRef, types storiface.SectorFileType) (storiface.CallID, error) {
 	panic("implement me")
 }
@@ -190,6 +211,7 @@ func TestSchedStartStop(t *testing.T) {
 }
 
 func TestSched(t *testing.T) {
+	//stm: @WORKER_JOBS_001
 	storiface.ParallelNum = 1
 	storiface.ParallelDenom = 1
 

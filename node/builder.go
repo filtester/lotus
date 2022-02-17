@@ -15,11 +15,11 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 	ci "github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/host"
+	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	"github.com/libp2p/go-libp2p-core/routing"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
-	"github.com/libp2p/go-libp2p-peerstore/pstoremem"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	record "github.com/libp2p/go-libp2p-record"
 	"github.com/libp2p/go-libp2p/p2p/net/conngater"
@@ -69,6 +69,7 @@ var (
 	BandwidthReporterKey = special{11} // Libp2p option
 	ConnGaterKey         = special{12} // libp2p option
 	DAGStoreKey          = special{13} // constructor returns multiple values
+	ResourceManagerKey   = special{14} // Libp2p option
 )
 
 type invoke int
@@ -162,6 +163,12 @@ func defaults() []Option {
 		}),
 
 		Override(new(dtypes.ShutdownChan), make(chan struct{})),
+
+		// the great context in the sky, otherwise we can't DI build genesis; there has to be a better
+		// solution than this hack.
+		Override(new(context.Context), func(lc fx.Lifecycle, mctx helpers.MetricsCtx) context.Context {
+			return helpers.LifecycleCtx(mctx, lc)
+		}),
 	}
 }
 
@@ -170,7 +177,7 @@ var LibP2P = Options(
 	Override(new(dtypes.Bootstrapper), dtypes.Bootstrapper(false)),
 
 	// Host dependencies
-	Override(new(peerstore.Peerstore), pstoremem.NewPeerstore),
+	Override(new(peerstore.Peerstore), lp2p.Peerstore),
 	Override(PstoreAddSelfKeysKey, lp2p.PstoreAddSelfKeys),
 	Override(StartListeningKey, lp2p.StartListening(config.DefaultFullNode().Libp2p.ListenAddresses)),
 
@@ -210,6 +217,10 @@ var LibP2P = Options(
 	Override(ConnectionManagerKey, lp2p.ConnectionManager(50, 200, 20*time.Second, nil)),
 	Override(new(*conngater.BasicConnectionGater), lp2p.ConnGater),
 	Override(ConnGaterKey, lp2p.ConnGaterOption),
+
+	// Services (resource management)
+	Override(new(network.ResourceManager), lp2p.ResourceManager),
+	Override(ResourceManagerKey, lp2p.ResourceManagerOption),
 )
 
 func IsType(t repo.RepoType) func(s *Settings) bool {
