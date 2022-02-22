@@ -1,7 +1,6 @@
 package sectorstorage
 
 import (
-
 	"context"
 
 	"golang.org/x/xerrors"
@@ -14,20 +13,20 @@ import (
 )
 
 type existingSelector struct {
-	index      		stores.SectorIndex
-	sector     		abi.SectorID
-	alloc      		storiface.SectorFileType
-	allowFetch 		bool
-	hostname 		string
+	index      stores.SectorIndex
+	sector     abi.SectorID
+	alloc      storiface.SectorFileType
+	allowFetch bool
+	hostname   string
 }
 
-func newExistingSelector(index stores.SectorIndex, sector abi.SectorID, alloc storiface.SectorFileType, allowFetch bool,hostname string) *existingSelector {
+func newExistingSelector(index stores.SectorIndex, sector abi.SectorID, alloc storiface.SectorFileType, allowFetch bool, hostname string) *existingSelector {
 	return &existingSelector{
 		index:      index,
 		sector:     sector,
 		alloc:      alloc,
 		allowFetch: allowFetch,
-		hostname:	hostname,
+		hostname:   hostname,
 	}
 }
 
@@ -44,10 +43,8 @@ func (s *existingSelector) Ok(ctx context.Context, task sealtasks.TaskType, spt 
 	}
 	if len(s.hostname) > 0 {
 		if s.hostname != whnd.info.Hostname {
-			log.Infof("existingSelector, hostname not match: %s != %s", s.hostname, whnd.info.Hostname)
 			return false, nil
 		}
-		log.Infof("existingSelector, hostname is matched: %s = %s", s.hostname, whnd.info.Hostname)
 	}
 
 	paths, err := whnd.workerRpc.Paths(ctx)
