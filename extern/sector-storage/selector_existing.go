@@ -17,15 +17,20 @@ type existingSelector struct {
 	sector     abi.SectorID
 	alloc      storiface.SectorFileType
 	allowFetch bool
+	hostname   string
 }
 
-func newExistingSelector(index stores.SectorIndex, sector abi.SectorID, alloc storiface.SectorFileType, allowFetch bool) *existingSelector {
+func newExistingSelector(index stores.SectorIndex, sector abi.SectorID, alloc storiface.SectorFileType, allowFetch bool, hostname string) *existingSelector {
 	return &existingSelector{
 		index:      index,
 		sector:     sector,
 		alloc:      alloc,
 		allowFetch: allowFetch,
+		hostname:   hostname,
 	}
+}
+
+func (s *existingSelector) SetGarbage(b bool) {
 }
 
 func (s *existingSelector) Ok(ctx context.Context, task sealtasks.TaskType, spt abi.RegisteredSealProof, whnd *workerHandle) (bool, error) {
@@ -35,6 +40,11 @@ func (s *existingSelector) Ok(ctx context.Context, task sealtasks.TaskType, spt 
 	}
 	if _, supported := tasks[task]; !supported {
 		return false, nil
+	}
+	if len(s.hostname) > 0 {
+		if s.hostname != whnd.info.Hostname {
+			return false, nil
+		}
 	}
 
 	paths, err := whnd.workerRpc.Paths(ctx)

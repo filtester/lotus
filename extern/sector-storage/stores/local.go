@@ -211,10 +211,14 @@ func (st *Local) OpenPath(ctx context.Context, p string) error {
 	if err != nil {
 		return err
 	}
+	hostname, _ := os.Hostname() // TODO: allow overriding from config
+	hostnameExt := os.Getenv("LOTUS_HOSTNAME_EXT")
+	hostname += hostnameExt
 
 	err = st.index.StorageAttach(ctx, StorageInfo{
 		ID:         meta.ID,
 		URLs:       st.urls,
+		Hostname:   hostname,
 		Weight:     meta.Weight,
 		MaxStorage: meta.MaxStorage,
 		CanSeal:    meta.CanSeal,
@@ -277,9 +281,11 @@ func (st *Local) Redeclare(ctx context.Context) error {
 			log.Errorf("storage path ID changed: %s; %s -> %s", p.local, id, meta.ID)
 			continue
 		}
+		hostname, _ := os.Hostname() // TODO: allow overriding from config
 
 		err = st.index.StorageAttach(ctx, StorageInfo{
 			ID:         id,
+			Hostname:   hostname,
 			URLs:       st.urls,
 			Weight:     meta.Weight,
 			MaxStorage: meta.MaxStorage,

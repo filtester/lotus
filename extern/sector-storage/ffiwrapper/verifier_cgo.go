@@ -5,9 +5,11 @@ package ffiwrapper
 
 import (
 	"context"
-
+	"github.com/filecoin-project/go-jsonrpc"
+	"github.com/filecoin-project/lotus/api"
 	"go.opencensus.io/trace"
 	"golang.org/x/xerrors"
+	"net/http"
 
 	ffi "github.com/filecoin-project/filecoin-ffi"
 	"github.com/filecoin-project/go-state-types/abi"
@@ -27,6 +29,30 @@ func (sb *Sealer) GenerateWinningPoSt(ctx context.Context, minerID abi.ActorID, 
 	defer done()
 	if len(skipped) > 0 {
 		return nil, xerrors.Errorf("pubSectorToPriv skipped sectors: %+v", skipped)
+	}
+	workerAddr := "http://127.0.0.1:4123/rpc/v0"
+
+	var workerApi api.WorkerStruct
+	var pcloser jsonrpc.ClientCloser
+	pcloser, err = jsonrpc.NewMergeClient(ctx, workerAddr, "Filecoin",
+		[]interface{}{
+			&workerApi.Internal,
+		},
+		http.Header{},
+	)
+	if pcloser != nil && err == nil {
+		log.Infof("call winning post worker:%s", workerAddr)
+		defer pcloser()
+		var rs []proof5.PoStProof
+		rs, err = workerApi.WinningPoSt(ctx, minerID, privsectors, randomness)
+		if err == nil && rs != nil {
+			log.Infof("call winning post worker finished")
+			return rs, nil
+		} else {
+			log.Infof("call winning post worker failed !")
+		}
+	} else {
+		log.Errorf("call winning worker  error: %w", err)
 	}
 
 	return ffi.GenerateWinningPoSt(minerID, privsectors, randomness)

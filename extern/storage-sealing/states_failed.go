@@ -18,7 +18,7 @@ import (
 	"github.com/filecoin-project/go-commp-utils/zerocomm"
 )
 
-const minRetryTime = 1 * time.Minute
+const minRetryTime = 5 * time.Minute
 
 func failedCooldown(ctx statemachine.Context, sector SectorInfo) error {
 	// TODO: Exponential backoff when we see consecutive failures

@@ -33,6 +33,7 @@ type Group = string
 
 type StorageInfo struct {
 	ID         ID
+	Hostname	string
 	URLs       []string // TODO: Support non-http transports
 	Weight     uint64
 	MaxStorage uint64
@@ -50,6 +51,7 @@ type HealthReport struct {
 }
 
 type SectorStorageInfo struct {
+	Hostname	string
 	ID     ID
 	URLs   []string // TODO: Support non-http transports
 	Weight uint64
@@ -186,6 +188,7 @@ func (i *Index) StorageAttach(ctx context.Context, si StorageInfo, st fsutil.FsS
 	}
 	return nil
 }
+
 
 func (i *Index) StorageReportHealth(ctx context.Context, id ID, report HealthReport) error {
 	i.lk.Lock()
@@ -344,7 +347,7 @@ func (i *Index) StorageFindSector(ctx context.Context, s abi.SectorID, ft storif
 			ID:     id,
 			URLs:   urls,
 			Weight: st.info.Weight * n, // storage with more sector types is better
-
+			Hostname:st.info.Hostname,
 			CanSeal:  st.info.CanSeal,
 			CanStore: st.info.CanStore,
 
@@ -413,6 +416,7 @@ func (i *Index) StorageFindSector(ctx context.Context, s abi.SectorID, ft storif
 				ID:     id,
 				URLs:   urls,
 				Weight: st.info.Weight * 0, // TODO: something better than just '0'
+				Hostname:st.info.Hostname,
 
 				CanSeal:  st.info.CanSeal,
 				CanStore: st.info.CanStore,

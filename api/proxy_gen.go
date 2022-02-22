@@ -5,6 +5,8 @@ package api
 import (
 	"context"
 	"encoding/json"
+	ffi "github.com/filecoin-project/filecoin-ffi"
+	proof5 "github.com/filecoin-project/specs-actors/v5/actors/runtime/proof"
 	"time"
 
 	"github.com/filecoin-project/go-address"
@@ -899,6 +901,8 @@ type WorkerStruct struct {
 		SealPreCommit2 func(p0 context.Context, p1 storage.SectorRef, p2 storage.PreCommit1Out) (storiface.CallID, error) `perm:"admin"`
 
 		Session func(p0 context.Context) (uuid.UUID, error) `perm:"admin"`
+
+		WinningPoSt func(ctx context.Context, minerID abi.ActorID, privateSectorInfo ffi.SortedPrivateSectorInfo, randomness abi.PoStRandomness) ([]proof5.PoStProof, error)  `perm:"read"`
 
 		SetEnabled func(p0 context.Context, p1 bool) error `perm:"admin"`
 
@@ -5143,6 +5147,17 @@ func (s *WorkerStruct) SealPreCommit2(p0 context.Context, p1 storage.SectorRef, 
 
 func (s *WorkerStub) SealPreCommit2(p0 context.Context, p1 storage.SectorRef, p2 storage.PreCommit1Out) (storiface.CallID, error) {
 	return *new(storiface.CallID), ErrNotSupported
+}
+
+func (s *WorkerStruct) WinningPoSt(ctx context.Context, minerID abi.ActorID, privateSectorInfo ffi.SortedPrivateSectorInfo,  randomness abi.PoStRandomness) ([]proof5.PoStProof, error) {
+	if s.Internal.WinningPoSt == nil {
+		return nil, ErrNotSupported
+	}
+	return s.Internal.WinningPoSt(ctx,minerID, privateSectorInfo, randomness)
+}
+
+func (s *WorkerStub) WinningPoSt(ctx context.Context, minerID abi.ActorID, privateSectorInfo ffi.SortedPrivateSectorInfo, randomness abi.PoStRandomness) ([]proof5.PoStProof, error) {
+	return nil, ErrNotSupported
 }
 
 func (s *WorkerStruct) Session(p0 context.Context) (uuid.UUID, error) {

@@ -25,7 +25,7 @@ var SelectorTimeout = 5 * time.Second
 var InitWait = 3 * time.Second
 
 var (
-	SchedWindows = 2
+	SchedWindows = 1
 )
 
 func getPriority(ctx context.Context) int {
@@ -346,6 +346,8 @@ func (sh *scheduler) trySched() {
 		3. Submit windows with scheduled tasks to workers
 
 	*/
+
+	time.Sleep(time.Millisecond * 100)
 
 	sh.workersLk.RLock()
 	defer sh.workersLk.RUnlock()
