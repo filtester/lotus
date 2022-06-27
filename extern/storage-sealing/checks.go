@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"context"
 
-	"github.com/filecoin-project/lotus/chain/actors/policy"
+	prooftypes "github.com/filecoin-project/go-state-types/proof"
 
-	proof2 "github.com/filecoin-project/specs-actors/v2/actors/runtime/proof"
+	"github.com/filecoin-project/lotus/chain/actors/policy"
 
 	"golang.org/x/xerrors"
 
@@ -177,7 +177,7 @@ func (m *Sealing) checkCommit(ctx context.Context, si SectorInfo, proof []byte, 
 		log.Warn("on-chain sealed CID doesn't match!")
 	}
 
-	ok, err := m.verif.VerifySeal(proof2.SealVerifyInfo{
+	ok, err := m.verif.VerifySeal(prooftypes.SealVerifyInfo{
 		SectorID:              m.minerSectorID(si.SectorNumber),
 		SealedCID:             pci.Info.SealedCID,
 		SealProof:             pci.Info.SealProof,
@@ -214,8 +214,13 @@ func checkReplicaUpdate(ctx context.Context, maddr address.Address, si SectorInf
 	if err != nil {
 		return &ErrApi{xerrors.Errorf("calling StateComputeDataCommitment: %w", err)}
 	}
-	if si.UpdateUnsealed == nil || !commD.Equals(*si.UpdateUnsealed) {
-		return &ErrBadRU{xerrors.Errorf("on chain CommD differs from sector: %s != %s", commD, si.CommD)}
+
+	if si.UpdateUnsealed == nil {
+		return &ErrBadRU{xerrors.New("nil UpdateUnsealed cid after replica update")}
+	}
+
+	if !commD.Equals(*si.UpdateUnsealed) {
+		return &ErrBadRU{xerrors.Errorf("calculated CommD differs from updated replica: %s != %s", commD, *si.UpdateUnsealed)}
 	}
 
 	if si.UpdateSealed == nil {

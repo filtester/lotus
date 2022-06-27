@@ -8,6 +8,7 @@ import (
 	"github.com/filecoin-project/go-state-types/network"
 
 	"github.com/filecoin-project/lotus/blockstore"
+	"github.com/filecoin-project/lotus/chain/actors"
 	"github.com/filecoin-project/lotus/chain/consensus/filcns"
 	"github.com/filecoin-project/lotus/chain/state"
 	"github.com/filecoin-project/lotus/chain/stmgr"
@@ -155,12 +156,12 @@ func (d *Driver) ExecuteTipset(bs blockstore.Blockstore, ds ds.Batching, params 
 		results:  []*vm.ApplyRet{},
 	}
 
-	sm.SetVMConstructor(func(ctx context.Context, vmopt *vm.VMOpts) (*vm.VM, error) {
+	sm.SetVMConstructor(func(ctx context.Context, vmopt *vm.VMOpts) (vm.Interface, error) {
 		vmopt.CircSupplyCalc = func(context.Context, abi.ChainEpoch, *state.StateTree) (abi.TokenAmount, error) {
 			return big.Zero(), nil
 		}
 
-		return vm.NewVM(ctx, vmopt)
+		return vm.NewLegacyVM(ctx, vmopt)
 	})
 
 	postcid, receiptsroot, err := tse.ApplyBlocks(context.Background(),
@@ -226,7 +227,7 @@ func (d *Driver) ExecuteMessage(bs blockstore.Blockstore, params ExecuteMessageP
 		NetworkVersion: params.NetworkVersion,
 	}
 
-	lvm, err := vm.NewVM(context.TODO(), vmOpts)
+	lvm, err := vm.NewLegacyVM(context.TODO(), vmOpts)
 	if err != nil {
 		return nil, cid.Undef, err
 	}
@@ -235,7 +236,8 @@ func (d *Driver) ExecuteMessage(bs blockstore.Blockstore, params ExecuteMessageP
 
 	// register the chaos actor if required by the vector.
 	if chaosOn, ok := d.selector["chaos_actor"]; ok && chaosOn == "true" {
-		invoker.Register(nil, chaos.Actor{})
+		av, _ := actors.VersionForNetwork(params.NetworkVersion)
+		invoker.Register(av, nil, chaos.Actor{})
 	}
 
 	lvm.SetInvoker(invoker)

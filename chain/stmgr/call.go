@@ -5,6 +5,12 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/filecoin-project/lotus/blockstore"
+
+	cbor "github.com/ipfs/go-ipld-cbor"
+
+	"github.com/filecoin-project/lotus/chain/state"
+
 	"github.com/filecoin-project/lotus/chain/rand"
 
 	"github.com/filecoin-project/go-address"
@@ -64,6 +70,8 @@ func (sm *StateManager) Call(ctx context.Context, msg *types.Message, ts *types.
 		pheight = ts.Height() - 1
 	}
 
+	// Since we're simulating a future message, pretend we're applying it in the "next" tipset
+	vmHeight := pheight + 1
 	bstate := ts.ParentState()
 
 	// Run the (not expensive) migration.
@@ -74,7 +82,7 @@ func (sm *StateManager) Call(ctx context.Context, msg *types.Message, ts *types.
 
 	vmopt := &vm.VMOpts{
 		StateBase:      bstate,
-		Epoch:          pheight + 1,
+		Epoch:          vmHeight,
 		Rand:           rand.NewStateRand(sm.cs, ts.Cids(), sm.beacon, sm.GetNetworkVersion),
 		Bstore:         sm.cs.StateBlockstore(),
 		Actors:         sm.tsExec.NewActorRegistry(),
@@ -112,7 +120,12 @@ func (sm *StateManager) Call(ctx context.Context, msg *types.Message, ts *types.
 		)
 	}
 
-	fromActor, err := vmi.StateTree().GetActor(msg.From)
+	stTree, err := sm.StateTree(bstate)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to load state tree: %w", err)
+	}
+
+	fromActor, err := stTree.GetActor(msg.From)
 	if err != nil {
 		return nil, xerrors.Errorf("call raw get actor: %s", err)
 	}
@@ -175,13 +188,16 @@ func (sm *StateManager) CallWithGas(ctx context.Context, msg *types.Message, pri
 		}
 	}
 
-	state, _, err := sm.TipSetState(ctx, ts)
+	// Since we're simulating a future message, pretend we're applying it in the "next" tipset
+	vmHeight := ts.Height() + 1
+
+	stateCid, _, err := sm.TipSetState(ctx, ts)
 	if err != nil {
 		return nil, xerrors.Errorf("computing tipset state: %w", err)
 	}
 
 	// Technically, the tipset we're passing in here should be ts+1, but that may not exist.
-	state, err = sm.HandleStateForks(ctx, state, ts.Height(), nil, ts)
+	stateCid, err = sm.HandleStateForks(ctx, stateCid, ts.Height(), nil, ts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to handle fork: %w", err)
 	}
@@ -196,11 +212,12 @@ func (sm *StateManager) CallWithGas(ctx context.Context, msg *types.Message, pri
 		)
 	}
 
+	buffStore := blockstore.NewTieredBstore(sm.cs.StateBlockstore(), blockstore.NewMemorySync())
 	vmopt := &vm.VMOpts{
-		StateBase:      state,
-		Epoch:          ts.Height() + 1,
+		StateBase:      stateCid,
+		Epoch:          vmHeight,
 		Rand:           r,
-		Bstore:         sm.cs.StateBlockstore(),
+		Bstore:         buffStore,
 		Actors:         sm.tsExec.NewActorRegistry(),
 		Syscalls:       sm.Syscalls,
 		CircSupplyCalc: sm.GetVMCirculatingSupply,
@@ -219,7 +236,19 @@ func (sm *StateManager) CallWithGas(ctx context.Context, msg *types.Message, pri
 		}
 	}
 
-	fromActor, err := vmi.StateTree().GetActor(msg.From)
+	// We flush to get the VM's view of the state tree after applying the above messages
+	// This is needed to get the correct nonce from the actor state to match the VM
+	stateCid, err = vmi.Flush(ctx)
+	if err != nil {
+		return nil, xerrors.Errorf("flushing vm: %w", err)
+	}
+
+	stTree, err := state.LoadStateTree(cbor.NewCborStore(buffStore), stateCid)
+	if err != nil {
+		return nil, xerrors.Errorf("loading state tree: %w", err)
+	}
+
+	fromActor, err := stTree.GetActor(msg.From)
 	if err != nil {
 		return nil, xerrors.Errorf("call raw get actor: %s", err)
 	}

@@ -8,11 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/filecoin-project/lotus/chain/actors/policy"
 	"github.com/stretchr/testify/require"
 
 	datatransfer "github.com/filecoin-project/go-data-transfer"
+	"github.com/filecoin-project/go-fil-markets/shared_testutil"
 	"github.com/filecoin-project/go-state-types/abi"
+	provider "github.com/filecoin-project/index-provider"
 
 	"github.com/filecoin-project/lotus/api"
 	"github.com/filecoin-project/lotus/itests/kit"
@@ -25,6 +26,10 @@ import (
 // TestDealWithMarketAndMinerNode is running concurrently a number of storage and retrieval deals towards a miner
 // architecture where the `mining/sealing/proving` node is a separate process from the `markets` node
 func TestDealWithMarketAndMinerNode(t *testing.T) {
+	//stm: @CHAIN_SYNCER_LOAD_GENESIS_001, @CHAIN_SYNCER_FETCH_TIPSET_001,
+	//stm: @CHAIN_SYNCER_START_001, @CHAIN_SYNCER_SYNC_001, @BLOCKCHAIN_BEACON_VALIDATE_BLOCK_VALUES_01
+	//stm: @CHAIN_SYNCER_COLLECT_CHAIN_001, @CHAIN_SYNCER_COLLECT_HEADERS_001, @CHAIN_SYNCER_VALIDATE_TIPSET_001
+	//stm: @CHAIN_SYNCER_NEW_PEER_HEAD_001, @CHAIN_SYNCER_VALIDATE_MESSAGE_META_001, @CHAIN_SYNCER_STOP_001
 	if testing.Short() {
 		t.Skip("skipping test in short mode")
 	}
@@ -32,12 +37,6 @@ func TestDealWithMarketAndMinerNode(t *testing.T) {
 	t.Skip("skipping due to flakiness: see #6956")
 
 	kit.QuietMiningLogs()
-
-	oldDelay := policy.GetPreCommitChallengeDelay()
-	policy.SetPreCommitChallengeDelay(5)
-	t.Cleanup(func() {
-		policy.SetPreCommitChallengeDelay(oldDelay)
-	})
 
 	// For these tests where the block time is artificially short, just use
 	// a deal start epoch that is guaranteed to be far enough in the future
@@ -47,7 +46,9 @@ func TestDealWithMarketAndMinerNode(t *testing.T) {
 	runTest := func(t *testing.T, n int, fastRetrieval bool, carExport bool) {
 		api.RunningNodeType = api.NodeMiner // TODO(anteva): fix me
 
-		client, main, market, _ := kit.EnsembleWithMinerAndMarketNodes(t, kit.ThroughRPC())
+		idxProv := shared_testutil.NewMockIndexProvider()
+		idxProvOpt := kit.ConstructorOpts(node.Override(new(provider.Interface), idxProv))
+		client, main, market, _ := kit.EnsembleWithMinerAndMarketNodes(t, kit.ThroughRPC(), idxProvOpt)
 
 		dh := kit.NewDealHarness(t, client, main, market)
 
@@ -56,6 +57,7 @@ func TestDealWithMarketAndMinerNode(t *testing.T) {
 			FastRetrieval: fastRetrieval,
 			CarExport:     carExport,
 			StartEpoch:    startEpoch,
+			IndexProvider: idxProv,
 		})
 	}
 
@@ -81,12 +83,6 @@ func TestDealCyclesConcurrent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping test in short mode")
 	}
-
-	oldDelay := policy.GetPreCommitChallengeDelay()
-	policy.SetPreCommitChallengeDelay(5)
-	t.Cleanup(func() {
-		policy.SetPreCommitChallengeDelay(oldDelay)
-	})
 
 	kit.QuietMiningLogs()
 
@@ -121,6 +117,10 @@ func TestDealCyclesConcurrent(t *testing.T) {
 }
 
 func TestSimultanenousTransferLimit(t *testing.T) {
+	//stm: @CHAIN_SYNCER_LOAD_GENESIS_001, @CHAIN_SYNCER_FETCH_TIPSET_001,
+	//stm: @CHAIN_SYNCER_START_001, @CHAIN_SYNCER_SYNC_001, @BLOCKCHAIN_BEACON_VALIDATE_BLOCK_VALUES_01
+	//stm: @CHAIN_SYNCER_COLLECT_CHAIN_001, @CHAIN_SYNCER_COLLECT_HEADERS_001, @CHAIN_SYNCER_VALIDATE_TIPSET_001
+	//stm: @CHAIN_SYNCER_NEW_PEER_HEAD_001, @CHAIN_SYNCER_VALIDATE_MESSAGE_META_001, @CHAIN_SYNCER_STOP_001
 	t.Skip("skipping as flaky #7152")
 
 	if testing.Short() {
@@ -128,12 +128,6 @@ func TestSimultanenousTransferLimit(t *testing.T) {
 	}
 
 	kit.QuietMiningLogs()
-
-	oldDelay := policy.GetPreCommitChallengeDelay()
-	policy.SetPreCommitChallengeDelay(5)
-	t.Cleanup(func() {
-		policy.SetPreCommitChallengeDelay(oldDelay)
-	})
 
 	// For these tests where the block time is artificially short, just use
 	// a deal start epoch that is guaranteed to be far enough in the future

@@ -4,18 +4,6 @@ import (
 	"context"
 	"sync/atomic"
 
-	"github.com/filecoin-project/lotus/chain/rand"
-
-	"github.com/ipfs/go-cid"
-	cbg "github.com/whyrusleeping/cbor-gen"
-	"go.opencensus.io/stats"
-	"go.opencensus.io/trace"
-	"golang.org/x/xerrors"
-
-	"github.com/filecoin-project/go-state-types/abi"
-	"github.com/filecoin-project/go-state-types/big"
-	blockadt "github.com/filecoin-project/specs-actors/actors/util/adt"
-
 	/* inline-gen template
 	   {{range .actorVersions}}
 	   	exported{{.}} "github.com/filecoin-project/specs-actors{{import .}}actors/builtin/exported"{{end}}
@@ -29,9 +17,23 @@ import (
 	exported5 "github.com/filecoin-project/specs-actors/v5/actors/builtin/exported"
 	exported6 "github.com/filecoin-project/specs-actors/v6/actors/builtin/exported"
 	exported7 "github.com/filecoin-project/specs-actors/v7/actors/builtin/exported"
+	exported8 "github.com/filecoin-project/specs-actors/v8/actors/builtin/exported"
 
 	/* inline-gen end */
 
+	"github.com/filecoin-project/lotus/chain/rand"
+
+	"github.com/ipfs/go-cid"
+	cbg "github.com/whyrusleeping/cbor-gen"
+	"go.opencensus.io/stats"
+	"go.opencensus.io/trace"
+	"golang.org/x/xerrors"
+
+	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/go-state-types/big"
+	blockadt "github.com/filecoin-project/specs-actors/actors/util/adt"
+
+	"github.com/filecoin-project/lotus/blockstore"
 	"github.com/filecoin-project/lotus/build"
 	"github.com/filecoin-project/lotus/chain/actors"
 	"github.com/filecoin-project/lotus/chain/actors/builtin"
@@ -47,20 +49,21 @@ import (
 func NewActorRegistry() *vm.ActorRegistry {
 	inv := vm.NewActorRegistry()
 
-	// TODO: define all these properties on the actors themselves, in specs-actors.
 	/* inline-gen template
 	{{range .actorVersions}}
-	inv.Register(vm.ActorsVersionPredicate(actors.Version{{.}}), exported{{.}}.BuiltinActors()...){{end}}
+	inv.Register(actors.Version{{.}}, vm.ActorsVersionPredicate(actors.Version{{.}}), exported{{.}}.BuiltinActors()...){{end}}
+
 
 	/* inline-gen start */
 
-	inv.Register(vm.ActorsVersionPredicate(actors.Version0), exported0.BuiltinActors()...)
-	inv.Register(vm.ActorsVersionPredicate(actors.Version2), exported2.BuiltinActors()...)
-	inv.Register(vm.ActorsVersionPredicate(actors.Version3), exported3.BuiltinActors()...)
-	inv.Register(vm.ActorsVersionPredicate(actors.Version4), exported4.BuiltinActors()...)
-	inv.Register(vm.ActorsVersionPredicate(actors.Version5), exported5.BuiltinActors()...)
-	inv.Register(vm.ActorsVersionPredicate(actors.Version6), exported6.BuiltinActors()...)
-	inv.Register(vm.ActorsVersionPredicate(actors.Version7), exported7.BuiltinActors()...)
+	inv.Register(actors.Version0, vm.ActorsVersionPredicate(actors.Version0), exported0.BuiltinActors()...)
+	inv.Register(actors.Version2, vm.ActorsVersionPredicate(actors.Version2), exported2.BuiltinActors()...)
+	inv.Register(actors.Version3, vm.ActorsVersionPredicate(actors.Version3), exported3.BuiltinActors()...)
+	inv.Register(actors.Version4, vm.ActorsVersionPredicate(actors.Version4), exported4.BuiltinActors()...)
+	inv.Register(actors.Version5, vm.ActorsVersionPredicate(actors.Version5), exported5.BuiltinActors()...)
+	inv.Register(actors.Version6, vm.ActorsVersionPredicate(actors.Version6), exported6.BuiltinActors()...)
+	inv.Register(actors.Version7, vm.ActorsVersionPredicate(actors.Version7), exported7.BuiltinActors()...)
+	inv.Register(actors.Version8, vm.ActorsVersionPredicate(actors.Version8), exported8.BuiltinActors()...)
 
 	/* inline-gen end */
 
@@ -92,7 +95,8 @@ func (t *TipSetExecutor) ApplyBlocks(ctx context.Context, sm *stmgr.StateManager
 		partDone()
 	}()
 
-	makeVmWithBaseStateAndEpoch := func(base cid.Cid, e abi.ChainEpoch) (*vm.VM, error) {
+	ctx = blockstore.WithHotView(ctx)
+	makeVmWithBaseStateAndEpoch := func(base cid.Cid, e abi.ChainEpoch) (vm.Interface, error) {
 		vmopt := &vm.VMOpts{
 			StateBase:      base,
 			Epoch:          e,
@@ -109,7 +113,7 @@ func (t *TipSetExecutor) ApplyBlocks(ctx context.Context, sm *stmgr.StateManager
 		return sm.VMConstructor()(ctx, vmopt)
 	}
 
-	runCron := func(vmCron *vm.VM, epoch abi.ChainEpoch) error {
+	runCron := func(vmCron vm.Interface, epoch abi.ChainEpoch) error {
 		cronMsg := &types.Message{
 			To:         cron.Address,
 			From:       builtin.SystemActorAddr,
