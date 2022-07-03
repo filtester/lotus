@@ -37,6 +37,7 @@ type Group = string
 type StorageInfo struct {
 	ID         ID
 	URLs       []string // TODO: Support non-http transports
+	Hostname   string
 	Weight     uint64
 	MaxStorage uint64
 
@@ -57,7 +58,7 @@ type SectorStorageInfo struct {
 	URLs     []string // TODO: Support non-http transports
 	BaseURLs []string
 	Weight   uint64
-
+	Hostname string
 	CanSeal  bool
 	CanStore bool
 
