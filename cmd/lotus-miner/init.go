@@ -479,6 +479,7 @@ func storageMinerInit(ctx context.Context, cctx *cli.Context, api v1api.FullNode
 				AllowReplicaUpdate:       true,
 				AllowProveReplicaUpdate2: true,
 				AllowRegenSectorKey:      true,
+				AllowPreCommitSameHost:   true,
 			}, wsts, smsts)
 			if err != nil {
 				return err

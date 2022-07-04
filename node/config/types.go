@@ -328,7 +328,7 @@ type SealerConfig struct {
 	AllowReplicaUpdate       bool
 	AllowProveReplicaUpdate2 bool
 	AllowRegenSectorKey      bool
-
+	AllowPreCommitSameHost   bool
 	// ResourceFiltering instructs the system which resource filtering strategy
 	// to use when evaluating tasks against this worker. An empty value defaults
 	// to "hardware".

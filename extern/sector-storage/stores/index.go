@@ -136,6 +136,7 @@ func (i *Index) StorageAttach(ctx context.Context, si storiface.StorageInfo, st 
 		i.stores[si.ID].info.CanStore = si.CanStore
 		i.stores[si.ID].info.Groups = si.Groups
 		i.stores[si.ID].info.AllowTo = si.AllowTo
+		i.stores[si.ID].info.Hostname = si.Hostname
 
 		return nil
 	}
